@@ -6,6 +6,7 @@ import io.sustc.dto.RecipeRecord;
 import io.sustc.service.DatabaseService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -61,10 +62,21 @@ public class DatabaseServiceImpl implements DatabaseService {
         createTables();
 
         // TODO: implement your import logic
-        try (Connection conn = dataSource.getConnection()) {
-            String userSQL = "INSERT INTO users(AuthorId, AuthorName, Gender, Age, Followers, Following, Password, IsDeleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        Connection conn = DataSourceUtils.getConnection(dataSource);
+        try {
+            String userSQL = "INSERT INTO users(" +
+                    "AuthorId, " +
+                    "AuthorName, " +
+                    "Gender, " +
+                    "Age, " +
+                    "Followers, " +
+                    "Following, " +
+                    "Password, " +
+                    "IsDeleted) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+                    "ON CONFLICT (AuthorId) DO NOTHING";
             try (PreparedStatement ps = conn.prepareStatement(userSQL)) {
-                for(int i = 0; i < reviewRecords.size(); i++) {
+                for(int i = 0; i < userRecords.size(); i++) {
                     UserRecord userRecord = userRecords.get(i);
                     ps.setLong(1, userRecord.getAuthorId());
                     ps.setString(2, userRecord.getAuthorName());
@@ -75,26 +87,47 @@ public class DatabaseServiceImpl implements DatabaseService {
                     ps.setString(7, userRecord.getPassword());
                     ps.setBoolean(8, userRecord.isDeleted());
                     ps.addBatch();
-                    if(i % 1000 == 0) {
+                    if(i % 1000 == 0)
                         ps.executeBatch();
-                        ps.clearBatch();
-                    }
                 }
                 ps.executeBatch();
-                ps.clearBatch();
             }
 
-            String recipeSQL = "INSERT INTO recipes (RecipeId, Name, AuthorId, CookTime, PrepTime, TotalTime, DatePublished, Description, RecipeCategory, AggregatedRating, ReviewCount, Calories, FatContent, SaturatedFatContent, CholesterolContent, SodiumContent, CarbohydrateContent, FiberContent, SugarContent, ProteinContent, RecipeServings, RecipeYield) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            String recipeSQL = "INSERT INTO recipes (" +
+                    "RecipeId," +
+                    " Name," +
+                    " AuthorId," +
+                    " CookTime," +
+                    " PrepTime," +
+                    " TotalTime," +
+                    " DatePublished," +
+                    " Description," +
+                    " RecipeCategory," +
+                    " AggregatedRating," +
+                    " ReviewCount," +
+                    " Calories," +
+                    " FatContent," +
+                    " SaturatedFatContent," +
+                    " CholesterolContent," +
+                    " SodiumContent," +
+                    " CarbohydrateContent," +
+                    " FiberContent," +
+                    " SugarContent," +
+                    " ProteinContent," +
+                    " RecipeServings," +
+                    " RecipeYield) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                    "ON CONFLICT (RecipeId) DO NOTHING";
             try(PreparedStatement ps = conn.prepareStatement(recipeSQL)) {
                 for(int i = 0; i < recipeRecords.size(); i++) {
                     RecipeRecord recipeRecord = recipeRecords.get(i);
                     ps.setLong(1, recipeRecord.getRecipeId());
                     ps.setString(2, recipeRecord.getName());
-                    ps.setString(3, recipeRecord.getAuthorName());
+                    ps.setLong(3, recipeRecord.getAuthorId());
                     ps.setString(4, recipeRecord.getCookTime());
                     ps.setString(5, recipeRecord.getPrepTime());
                     ps.setString(6, recipeRecord.getTotalTime());
-                    ps.setString(7, recipeRecord.getDatePublished().toString());
+                    ps.setTimestamp(7, recipeRecord.getDatePublished());
                     ps.setString(8, recipeRecord.getDescription());
                     ps.setString(9, recipeRecord.getRecipeCategory());
                     ps.setFloat(10, recipeRecord.getAggregatedRating());
@@ -106,38 +139,96 @@ public class DatabaseServiceImpl implements DatabaseService {
                     ps.setFloat(16, recipeRecord.getSodiumContent());
                     ps.setFloat(17, recipeRecord.getCarbohydrateContent());
                     ps.setFloat(18, recipeRecord.getFiberContent());
-                    ps.setFloat(19, recipeRecord.getProteinContent());
-                    ps.setFloat(20, recipeRecord.getRecipeServings());
-                    ps.setString(21, recipeRecord.getRecipeYield());
+                    ps.setFloat(19, recipeRecord.getSugarContent());
+                    ps.setFloat(20, recipeRecord.getProteinContent());
+                    ps.setFloat(21, recipeRecord.getRecipeServings());
+                    ps.setString(22, recipeRecord.getRecipeYield());
                     ps.addBatch();
-                    if(i % 1000 == 0) {
+                    if(i % 1000 == 0)
                         ps.executeBatch();
-                    }
                 }
                 ps.executeBatch();
-                ps.clearBatch();
             }
 
-            String reviewSQL = "INSERT INTO reviews (RecipeId, RecipeId, AuthorId, Rating, Review, DateSubmitted, DateModified) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            String reviewSQL = "INSERT INTO reviews (" +
+                    "ReviewId, " +
+                    "RecipeId, " +
+                    "AuthorId, " +
+                    "Rating, " +
+                    "Review, " +
+                    "DateSubmitted, " +
+                    "DateModified) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?) " +
+                    "ON CONFLICT (ReviewId) DO NOTHING";
             try(PreparedStatement ps = conn.prepareStatement(reviewSQL)) {
                 for(int i = 0; i < reviewRecords.size(); i++) {
                     ReviewRecord reviewRecord = reviewRecords.get(i);
-                    ps.setLong(1, reviewRecord.getRecipeId());
+                    ps.setLong(1, reviewRecord.getReviewId());
                     ps.setLong(2, reviewRecord.getRecipeId());
                     ps.setLong(3, reviewRecord.getAuthorId());
                     ps.setFloat(4, reviewRecord.getRating());
                     ps.setString(5, reviewRecord.getReview());
                     ps.setTimestamp(6, reviewRecord.getDateSubmitted());
                     ps.setTimestamp(7, reviewRecord.getDateModified());
-                    if(i % 1000 == 0) {
+                    ps.addBatch();
+                    if(i % 1000 == 0)
                         ps.executeBatch();
+                }
+                ps.executeBatch();
+            }
+
+            String ingredientsSQL = "INSERT INTO recipe_ingredients (" +
+                    "RecipeId, " +
+                    "IngredientPart) " +
+                    "VALUES (?, ?) " +
+                    "ON CONFLICT DO NOTHING";
+            try(PreparedStatement ps = conn.prepareStatement(ingredientsSQL)) {
+                int counter = 0;
+                for(RecipeRecord recipeRecord : recipeRecords) {
+                    Set<String> uniqueIngredients = new HashSet<>(Arrays.asList(recipeRecord.getRecipeIngredientParts()));
+                    for(String ingredient : uniqueIngredients) {
+                        ps.setLong(1, recipeRecord.getRecipeId());
+                        ps.setString(2, ingredient);
+                        ps.addBatch();
+                        if(++counter % 1000 == 0)
+                            ps.executeBatch();
                     }
                 }
                 ps.executeBatch();
-                ps.clearBatch();
             }
 
-            String userfollowsSQL = "INSERT INTO user_follows (FollowerId, FollowingId) VALUES (?, ?)";
+            String reviewlikeSQL =  "INSERT INTO review_likes (ReviewId, AuthorId) " +
+                    "SELECT ?, ? " +
+                    "WHERE EXISTS (SELECT 1 FROM reviews WHERE ReviewId = ?) " +
+                    "  AND EXISTS (SELECT 1 FROM users WHERE AuthorId = ?) " +
+                    "ON CONFLICT DO NOTHING";
+            try(PreparedStatement ps = conn.prepareStatement(reviewlikeSQL)) {
+                int counter = 0;
+                for(ReviewRecord reviewRecord :  reviewRecords) {
+                    if (reviewRecord.getLikes() != null && reviewRecord.getLikes().length > 0) {
+                        Set<Long> uniqueLikes = new HashSet<>();
+                        for (long like : reviewRecord.getLikes()) {
+                            uniqueLikes.add(like);
+                        }
+                        for (long like : uniqueLikes) {
+                            ps.setLong(1, reviewRecord.getReviewId());
+                            ps.setLong(2, like);
+                            ps.setLong(3, reviewRecord.getReviewId());
+                            ps.setLong(4, like);
+                            ps.addBatch();
+                            if (++counter % 1000 == 0)
+                                ps.executeBatch();
+                        }
+                    }
+                }
+                ps.executeBatch();
+            }
+
+            String userfollowsSQL = "INSERT INTO user_follows (" +
+                    "FollowerId, " +
+                    "FollowingId) " +
+                    "VALUES (?, ?) " +
+                    "ON CONFLICT DO NOTHING";
             try(PreparedStatement ps = conn.prepareStatement(userfollowsSQL)) {
                 int counter = 0;
                 for(UserRecord user : userRecords) {
@@ -146,54 +237,20 @@ public class DatabaseServiceImpl implements DatabaseService {
                             ps.setLong(1, user.getAuthorId());
                             ps.setLong(2, followingId);
                             ps.addBatch();
-                            if(++counter % 1000 == 0) {
+                            if(++counter % 1000 == 0)
                                 ps.executeBatch();
-                            }
                         }
                     }
                 }
                 ps.executeBatch();
-                ps.clearBatch();
             }
 
-            String ingredientsSQL = "INSERT INTO ingredients (RecipeId, IngredientPart) VALUES (?, ?)";
-            try(PreparedStatement ps = conn.prepareStatement(ingredientsSQL)) {
-                int counter = 0;
-                for(RecipeRecord recipeRecord : recipeRecords) {
-                    for(String ingredient : recipeRecord.getRecipeIngredientParts()) {
-                        ps.setLong(1, recipeRecord.getRecipeId());
-                        ps.setString(2, ingredient);
-                        ps.addBatch();
-                        if(++counter % 1000 == 0) {
-                            ps.executeBatch();
-                        }
-                    }
-                }
-                ps.executeBatch();
-                ps.clearBatch();
-            }
-
-            String reviewlikeSQL =  "INSERT INTO review_likes (ReviewId, AuthorId) VALUES (?, ?)";
-            try(PreparedStatement ps = conn.prepareStatement(reviewlikeSQL)) {
-                int counter = 0;
-                for(ReviewRecord reviewRecord :  reviewRecords) {
-                    for(long like :  reviewRecord.getLikes()) {
-                        ps.setLong(1, reviewRecord.getRecipeId());
-                        ps.setLong(2, like);
-                        ps.addBatch();
-                        if(++counter % 1000 == 0) {
-                            ps.executeBatch();
-                        }
-                    }
-                }
-                ps.executeBatch();
-                ps.clearBatch();
-            }
         } catch (SQLException e) {
             e.printStackTrace();
             throw new RuntimeException("Import failed", e);
+        } finally {
+            DataSourceUtils.releaseConnection(conn, dataSource);
         }
-
     }
 
 
