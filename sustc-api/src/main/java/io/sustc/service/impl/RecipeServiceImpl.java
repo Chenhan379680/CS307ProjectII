@@ -61,62 +61,67 @@ public class RecipeServiceImpl implements RecipeService {
         if (page == null || page < 1 || size == null || size <= 0) {
             throw new IllegalArgumentException();
         }
-        StringBuilder wherePart = new StringBuilder("WHERE 1 = 1");
+        StringBuilder wherePart = new StringBuilder(" WHERE 1 = 1 ");
         List<Object> args = new ArrayList<>();
         if(StringUtils.hasText(keyword)){
-            wherePart.append("AND (LOWER(name)) LIKE ? OR (LOWER(description)) LIKE ?) ");
+            wherePart.append(" AND (LOWER(r.name) LIKE ? OR LOWER(r.description) LIKE ?) ");
             String patten = "%" + keyword + "%";
             args.add(patten);
             args.add(patten);
         }
 
         if(StringUtils.hasText(category)){
-            wherePart.append("AND RecipeCategory = ? ");
+            wherePart.append(" AND r.recipecategory = ? ");
             args.add(category);
         }
 
         if(minRating != null){
-            wherePart.append("AND RecipeRating >= ? ");
+            wherePart.append(" AND r.aggregatedrating >= ? ");
             args.add(minRating);
         }
 
-        wherePart.append("AND isdeleted = false");
+        wherePart.append(" AND r.isdeleted = false ");
 
-        String countSQL = "SELECT COUNT(*) FROM recipes " +  wherePart.toString();
+        String countSQL = "SELECT COUNT(*) FROM recipes r" +  wherePart.toString();
         Long total = jdbcTemplate.queryForObject(countSQL, Long.class, args.toArray());
         if(total == 0) {
             return new PageResult<>(new ArrayList<>(), page, size, 0L);
         }
 
-        StringBuilder sql = new StringBuilder("SELECT * FROM recipes ").append(wherePart);
+        StringBuilder sql = new StringBuilder("""
+                SELECT r.*, u.authorname AS authorName
+                FROM recipes r
+                LEFT JOIN users u ON r.authorid = u.authorid
+                """).append(wherePart);
 
         if(StringUtils.hasText(sort)){
             switch (sort) {
                 case "rating_desc" :
-                    sql.append(" ORDER BY aggregatedrating DESC, recipeid ASC");
+                    sql.append(" ORDER BY r.aggregatedrating DESC");
                     break;
                 case "date_desc" :
-                    sql.append(" ORDER BY datapublished DESC, recipeid ASC");
+                    sql.append(" ORDER BY r.datepublished DESC");
                     break;
-                case "calories_desc" :
-                    sql.append(" ORDER BY calories DESC, recipeid ASC");
+                case "calories_asc" :
+                    sql.append(" ORDER BY r.calories ASC");
                     break;
                 default:
-                    sql.append(" ORDER BY recipeid ASC");
                     break;
             }
         }
         else {
-            sql.append(" ORDER BY recipeid ASC");
+            sql.append(" ORDER BY r.recipeid ASC ");
         }
 
-        sql.append(" LIMIT ? OFFSET ?");
+        sql.append(" LIMIT ? OFFSET ? ");
         args.add(size);
         args.add((page - 1) * size);
         List<RecipeRecord> records = jdbcTemplate.query(
                 sql.toString(),
-                args.toArray(),
-                recipeRecordRowMapper);
+                recipeRecordRowMapper,
+                args.toArray()
+        );
+
         return new PageResult<>(records, page, size, total);
     }
 
