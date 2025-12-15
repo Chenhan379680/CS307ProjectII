@@ -115,8 +115,9 @@ public class DatabaseServiceImpl implements DatabaseService {
                     " SugarContent," +
                     " ProteinContent," +
                     " RecipeServings," +
-                    " RecipeYield) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                    " RecipeYield, " +
+                    " IsDeleted) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false) " +
                     "ON CONFLICT (RecipeId) DO NOTHING";
             try(PreparedStatement ps = conn.prepareStatement(recipeSQL)) {
                 for(int i = 0; i < recipeRecords.size(); i++) {
@@ -292,6 +293,7 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    ProteinContent DECIMAL(10,2), " +
                         "    RecipeServings VARCHAR(100), " +
                         "    RecipeYield VARCHAR(100), " +
+                        "    IsDeleted BOOLEAN DEFAULT FALSE, " +
                         "    FOREIGN KEY (AuthorId) REFERENCES users(AuthorId)" +
                         ")",
 
