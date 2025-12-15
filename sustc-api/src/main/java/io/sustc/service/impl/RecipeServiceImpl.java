@@ -45,12 +45,34 @@ public class RecipeServiceImpl implements RecipeService {
         if (recipeId <= 0) {
             throw new IllegalArgumentException();
         }
-        String sql = "SELECT * FROM recipes " +
-                "WHERE recipeid = ? " +
-                "AND isdeleted = false";
+
+        // 1. 修改 SQL：加入 LEFT JOIN 获取作者名字 (authorName)
+        // 就像修复 searchRecipes 一样，这里也需要作者名
+        String sql = """
+            SELECT r.*, u.authorname AS authorName
+            FROM recipes r
+            LEFT JOIN users u ON r.authorid = u.authorid
+            WHERE r.recipeid = ?
+            AND r.isdeleted = false
+        """;
+
         try {
-            return jdbcTemplate.queryForObject(sql, recipeRecordRowMapper, recipeId);
-        }  catch (EmptyResultDataAccessException e) {
+            // 执行主查询
+            RecipeRecord record = jdbcTemplate.queryForObject(sql, recipeRecordRowMapper, recipeId);
+
+            if (record != null) {
+                // 2. 修复配料查询：使用 queryForList 获取多行字符串
+                String ingredientSql = " SELECT ingredientpart FROM recipe_ingredients WHERE recipeid = ? ORDER BY LOWER(ingredientpart) ";
+                String[] ingredients = jdbcTemplate.queryForList(ingredientSql, String.class, recipeId).toArray(new String[0]);
+
+                // 3. 设置配料列表
+                record.setRecipeIngredientParts(ingredients);
+            }
+
+            // 4. 在这里直接返回，或者把 record 定义提到 try 外面
+            return record;
+
+        } catch (EmptyResultDataAccessException e) {
             return null;
         }
     }
@@ -97,20 +119,17 @@ public class RecipeServiceImpl implements RecipeService {
         if(StringUtils.hasText(sort)){
             switch (sort) {
                 case "rating_desc" :
-                    sql.append(" ORDER BY r.aggregatedrating DESC");
+                    sql.append(" ORDER BY r.aggregatedrating DESC, r.recipeid DESC ");
                     break;
                 case "date_desc" :
-                    sql.append(" ORDER BY r.datepublished DESC");
+                    sql.append(" ORDER BY r.datepublished DESC, r.recipeid DESC ");
                     break;
                 case "calories_asc" :
-                    sql.append(" ORDER BY r.calories ASC");
+                    sql.append(" ORDER BY r.calories ASC, r.recipeid DESC ");
                     break;
                 default:
                     break;
             }
-        }
-        else {
-            sql.append(" ORDER BY r.recipeid ASC ");
         }
 
         sql.append(" LIMIT ? OFFSET ? ");
@@ -121,6 +140,14 @@ public class RecipeServiceImpl implements RecipeService {
                 recipeRecordRowMapper,
                 args.toArray()
         );
+
+        if (records != null && !records.isEmpty()) {
+            String ingredientSql = " SELECT ingredientpart FROM recipe_ingredients WHERE recipeid = ? ORDER BY LOWER(ingredientpart) ";
+            for (RecipeRecord record : records) {
+                String[] ingredients = jdbcTemplate.queryForList(ingredientSql, String.class, record.getRecipeId()).toArray(new String[0]);
+                record.setRecipeIngredientParts(ingredients);
+            }
+        }
 
         return new PageResult<>(records, page, size, total);
     }
