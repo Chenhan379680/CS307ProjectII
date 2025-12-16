@@ -230,10 +230,10 @@ public class RecipeServiceImpl implements RecipeService {
     public void deleteRecipe(long recipeId, AuthInfo auth) {
         verifyAuth(auth);
 
-        String selcetAuthSQL = "SELECT authorid FROM recipes WHERE recipeid = ?";
+        String selectAuthSQL = "SELECT authorid FROM recipes WHERE recipeid = ?";
         Long authorId;
         try {
-            authorId = jdbcTemplate.queryForObject(selcetAuthSQL, Long.class, recipeId);
+            authorId = jdbcTemplate.queryForObject(selectAuthSQL, Long.class, recipeId);
         } catch (EmptyResultDataAccessException e) {
             return;
         }
