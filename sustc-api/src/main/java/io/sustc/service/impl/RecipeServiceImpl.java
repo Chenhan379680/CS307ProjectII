@@ -250,14 +250,14 @@ public class RecipeServiceImpl implements RecipeService {
     public void updateTimes(AuthInfo auth, long recipeId, String cookTimeIso, String prepTimeIso) {
         verifyAuth(auth);
 
-        String selcetAuthSQL = """
+        String selectAuthSQL = """
             SELECT AuthorId, CookTime, PrepTime FROM recipes
             WHERE RecipeId = ?
         """;
 
         Map<String, Object> map;
         try {
-            map = jdbcTemplate.queryForMap(selcetAuthSQL, recipeId);
+            map = jdbcTemplate.queryForMap(selectAuthSQL, recipeId);
         } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             throw new IllegalArgumentException("No recipe");
         }
