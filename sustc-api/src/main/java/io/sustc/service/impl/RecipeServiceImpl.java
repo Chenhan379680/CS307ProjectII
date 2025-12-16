@@ -31,8 +31,7 @@ public class RecipeServiceImpl implements RecipeService {
     @Override
     public String getNameFromID(long id) {
         String sql = "SELECT name FROM recipes " +
-                "WHERE recipeid = ? " +
-                "AND isdeleted = false";
+                "WHERE recipeid = ? ";
         try {
             return jdbcTemplate.queryForObject(sql, String.class, id);
         } catch (EmptyResultDataAccessException e) {
@@ -53,7 +52,6 @@ public class RecipeServiceImpl implements RecipeService {
             FROM recipes r
             LEFT JOIN users u ON r.authorid = u.authorid
             WHERE r.recipeid = ?
-            AND r.isdeleted = false
         """;
 
         try {
@@ -101,8 +99,6 @@ public class RecipeServiceImpl implements RecipeService {
             wherePart.append(" AND r.aggregatedrating >= ? ");
             args.add(minRating);
         }
-
-        wherePart.append(" AND r.isdeleted = false ");
 
         String countSQL = "SELECT COUNT(*) FROM recipes r" +  wherePart.toString();
         Long total = jdbcTemplate.queryForObject(countSQL, Long.class, args.toArray());
@@ -182,9 +178,8 @@ public class RecipeServiceImpl implements RecipeService {
                 "SugarContent, " +
                 "ProteinContent, " +
                 "RecipeServings, " +
-                "RecipeYield, " +
-                "IsDeleted) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ";
+                "RecipeYield) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ";
         Object[] args = new Object[]{
                 dto.getRecipeId(),
                 dto.getName(),
@@ -208,7 +203,6 @@ public class RecipeServiceImpl implements RecipeService {
                 dto.getProteinContent(),
                 dto.getRecipeServings(),
                 dto.getRecipeYield(),
-                false
         };
 
         String ingredientsSQL = "INSERT INTO recipe_ingredients (" +
@@ -248,7 +242,7 @@ public class RecipeServiceImpl implements RecipeService {
             throw new SecurityException();
         }
 
-        String deleteSQL = "UPDATE recipes SET isdeleted = TRUE WHERE recipeid = ?";
+        String deleteSQL = "DELETE FROM recipe_ingredients WHERE recipeid = ?";
         jdbcTemplate.update(deleteSQL, recipeId);
     }
 
@@ -259,7 +253,6 @@ public class RecipeServiceImpl implements RecipeService {
         String selcetAuthSQL = """
             SELECT AuthorId, CookTime, PrepTime FROM recipes
             WHERE RecipeId = ?
-            AND (IsDeleted IS FALSE OR IsDeleted IS NULL)
         """;
 
         Map<String, Object> map;

@@ -115,9 +115,8 @@ public class DatabaseServiceImpl implements DatabaseService {
                     " SugarContent," +
                     " ProteinContent," +
                     " RecipeServings," +
-                    " RecipeYield, " +
-                    " IsDeleted) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false) " +
+                    " RecipeYield) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
                     "ON CONFLICT (RecipeId) DO NOTHING";
             try(PreparedStatement ps = conn.prepareStatement(recipeSQL)) {
                 for(int i = 0; i < recipeRecords.size(); i++) {
@@ -293,7 +292,6 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    ProteinContent DECIMAL(10,2), " +
                         "    RecipeServings VARCHAR(100), " +
                         "    RecipeYield VARCHAR(100), " +
-                        "    IsDeleted BOOLEAN DEFAULT FALSE, " +
                         "    FOREIGN KEY (AuthorId) REFERENCES users(AuthorId)" +
                         ")",
 
@@ -306,7 +304,7 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    Review TEXT, " +
                         "    DateSubmitted TIMESTAMP, " +
                         "    DateModified TIMESTAMP, " +
-                        "    FOREIGN KEY (RecipeId) REFERENCES recipes(RecipeId), " +
+                        "    FOREIGN KEY (RecipeId) REFERENCES recipes(RecipeId) ON DELETE CASCADE, " +
                         "    FOREIGN KEY (AuthorId) REFERENCES users(AuthorId)" +
                         ")",
 
@@ -315,7 +313,7 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    RecipeId BIGINT, " +
                         "    IngredientPart VARCHAR(500), " +
                         "    PRIMARY KEY (RecipeId, IngredientPart), " +
-                        "    FOREIGN KEY (RecipeId) REFERENCES recipes(RecipeId)" +
+                        "    FOREIGN KEY (RecipeId) REFERENCES recipes(RecipeId) ON DELETE CASCADE " +
                         ")",
 
                 // 创建review_likes表
@@ -323,7 +321,7 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    ReviewId BIGINT, " +
                         "    AuthorId BIGINT, " +
                         "    PRIMARY KEY (ReviewId, AuthorId), " +
-                        "    FOREIGN KEY (ReviewId) REFERENCES reviews(ReviewId), " +
+                        "    FOREIGN KEY (ReviewId) REFERENCES reviews(ReviewId) ON DELETE CASCADE, " +
                         "    FOREIGN KEY (AuthorId) REFERENCES users(AuthorId)" +
                         ")",
 
