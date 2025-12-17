@@ -32,6 +32,8 @@ public class UserServiceImpl implements UserService {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    private final RowMapper<UserRecord> userRecordRowMapper = new BeanPropertyRowMapper<>(UserRecord.class);
+
     @Override
     public long register(RegisterUserReq req) {
         if(req == null) {
@@ -101,18 +103,95 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public boolean deleteAccount(AuthInfo auth, long userId) {
-        return false;
+        // 1. 验证操作者身份 (必须存在且活跃)
+        verifyAuth(auth);
+
+        // 2. 权限校验：只能删除自己的账户
+        if (auth.getAuthorId() != userId) {
+            throw new SecurityException("Access denied: You can only delete your own account.");
+        }
+
+        // 3. 检查目标用户是否存在及状态
+        String statusSql = "SELECT IsDeleted FROM users WHERE AuthorId = ?";
+        Boolean isDeleted;
+        try {
+            isDeleted = jdbcTemplate.queryForObject(statusSql, Boolean.class, userId);
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            // 目标用户不存在 -> IllegalArgumentException
+            throw new IllegalArgumentException("Target user does not exist.");
+        }
+
+        // 4. 如果已经是删除状态，返回 false
+        if (Boolean.TRUE.equals(isDeleted)) {
+            return false;
+        }
+
+        // 5. 执行软删除 (Mark as inactive)
+        String deleteUserSql = "UPDATE users SET IsDeleted = TRUE WHERE AuthorId = ?";
+        jdbcTemplate.update(deleteUserSql, userId);
+
+        // 6. 清理关注关系 (Remove follow relationships)
+        // 需求：
+        // a. 不再关注任何人 (follower_id = userId)
+        // b. 没人再关注此人 (followee_id = userId)
+        // 假设关注表名为 'follows'，字段为 'follower_id' 和 'followee_id' (请根据实际建表脚本调整表名/列名)
+        String clearFollowsSql = "DELETE FROM user_follows WHERE followerid = ? OR followingid = ?";
+        jdbcTemplate.update(clearFollowsSql, userId, userId);
+
+        return true;
     }
 
     @Override
     public boolean follow(AuthInfo auth, long followeeId) {
-     return false;
+        verifyAuth(auth);
+        long authorId = auth.getAuthorId();
+        if(authorId == followeeId) {
+            throw new SecurityException("Access denied: You cannot follow your own account.");
+        }
+        String checkSQL = "SELECT IsDeleted FROM users WHERE AuthorId = ?";
+        try {
+            Boolean isDeleted = jdbcTemplate.queryForObject(checkSQL, Boolean.class, authorId);
+            if(Boolean.TRUE.equals(isDeleted)) {
+                return false;
+            }
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            return false;
+        }
+        String relationSql = "SELECT COUNT(*) FROM user_follows WHERE followerid = ? AND followingid = ?";
+        Integer count = jdbcTemplate.queryForObject(relationSql, Integer.class, auth.getAuthorId(), followeeId);
+        if (count != null && count > 0) {
+            // A. 已关注 -> 执行取消关注 (Unfollow)
+            String deleteSql = "DELETE FROM user_follows WHERE followerid = ? AND followingid = ?";
+            int rows = jdbcTemplate.update(deleteSql, auth.getAuthorId(), followeeId);
+            return rows > 0;
+        } else {
+            // B. 未关注 -> 执行关注 (Follow)
+            String insertSql = "INSERT INTO user_follows (followerid, followingid) VALUES (?, ?)";
+            int rows = jdbcTemplate.update(insertSql, auth.getAuthorId(), followeeId);
+            return rows > 0;
+        }
     }
 
 
     @Override
     public UserRecord getById(long userId) {
-        return null;
+        String selectSQL = "SELECT * FROM users WHERE AuthorId = ?";
+        try {
+            UserRecord record = jdbcTemplate.queryForObject(selectSQL, userRecordRowMapper, userId);
+            if(record != null) {
+                String followerSQL = "SELECT followerid FROM user_follows WHERE followingid = ?";
+                String followingSQL = "SELECT followingid FROM user_follows WHERE followerid = ?";
+                List<Long> followerUsersList = jdbcTemplate.queryForList(followerSQL, Long.class, userId);
+                List<Long> followingUsersList = jdbcTemplate.queryForList(followingSQL, Long.class, userId);
+                long[] followerUsers = followerUsersList.stream().mapToLong(Long::longValue).toArray();
+                long[] followingUsers = followingUsersList.stream().mapToLong(Long::longValue).toArray();
+                record.setFollowerUsers(followerUsers);
+                record.setFollowingUsers(followingUsers);
+            }
+            return record;
+        } catch (EmptyResultDataAccessException e) {
+            return null;
+        }
     }
 
     @Override
@@ -155,5 +234,27 @@ public class UserServiceImpl implements UserService {
             return "Female";
         }
         return "Unknown";
+    }
+
+    public void verifyAuth(AuthInfo auth) {
+        if (auth == null) {
+            throw new SecurityException();
+        }
+        String sql = "SELECT IsDeleted FROM users WHERE AuthorId = ?";
+
+        try {
+            // queryForObject 查询单列
+            Boolean isDeleted = jdbcTemplate.queryForObject(sql, Boolean.class, auth.getAuthorId());
+
+            // 检查是否被删除
+            // Boolean.TRUE.equals 可以安全处理 isDeleted 为 null 的情况 (视为未删除)
+            if (Boolean.TRUE.equals(isDeleted)) {
+                throw new SecurityException("User is deleted (inactive).");
+            }
+
+        } catch (EmptyResultDataAccessException e) {
+            // 如果数据库里没有这个 AuthorId
+            throw new SecurityException("User does not exist.");
+        }
     }
 }
