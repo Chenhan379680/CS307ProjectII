@@ -12,6 +12,8 @@ import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.lang.Nullable;
+
 
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -33,6 +35,7 @@ public class UserServiceImpl implements UserService {
     private JdbcTemplate jdbcTemplate;
 
     private final RowMapper<UserRecord> userRecordRowMapper = new BeanPropertyRowMapper<>(UserRecord.class);
+    private final RowMapper<FeedItem> feedItemRowMapper = new BeanPropertyRowMapper<>(FeedItem.class);
 
     @Override
     public long register(RegisterUserReq req) {
@@ -262,16 +265,113 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void updateProfile(AuthInfo auth, String gender, Integer age) {
+        // 1. 验证用户身份 (必须存在且活跃)
         verifyAuth(auth);
-        if(login(auth) == -1L) {
-            throw new SecurityException("Access denied: You cannot update your own account.");
+
+        // 2. 参数校验 (Validation)
+        // Gender: 如果不为 null，必须是 "Male" 或 "Female"
+        if (gender != null && !gender.equals("Male") && !gender.equals("Female")) {
+            throw new IllegalArgumentException("Invalid gender. Must be 'Male' or 'Female'.");
         }
 
+        // Age: 如果不为 null，必须是正整数
+        if (age != null && age <= 0) {
+            throw new IllegalArgumentException("Invalid age. Must be a positive integer.");
+        }
+
+        // 3. 如果两个参数都是 null，直接返回，不需要操作数据库
+        if (gender == null && age == null) {
+            return;
+        }
+
+        // 4. 动态构建 SQL
+        StringBuilder sqlBuilder = new StringBuilder("UPDATE users SET ");
+        List<Object> params = new ArrayList<>();
+        boolean needComma = false;
+
+        if (gender != null) {
+            sqlBuilder.append("Gender = ?");
+            params.add(gender);
+            needComma = true;
+        }
+
+        if (age != null) {
+            if (needComma) {
+                sqlBuilder.append(", ");
+            }
+            sqlBuilder.append("Age = ?");
+            params.add(age);
+        }
+
+        // 5. 添加 WHERE 条件，确保只更新当前用户
+        sqlBuilder.append(" WHERE AuthorId = ?");
+        params.add(auth.getAuthorId());
+
+        // 6. 执行更新
+        jdbcTemplate.update(sqlBuilder.toString(), params.toArray());
     }
 
     @Override
-    public PageResult<FeedItem> feed(AuthInfo auth, int page, int size, String category) {
-        return null;
+    public PageResult<FeedItem> feed(AuthInfo auth, int page, int size, @Nullable String category) {
+        // 1. 验证用户身份 (必须存在且活跃)
+        verifyAuth(auth);
+
+        // 2. 分页参数自动修正 (Auto-adjust)
+        // 规则：page 从 1 开始，size 限制在 1~200 之间
+        if (page < 1) page = 1;
+        if (size < 1) size = 1;
+        if (size > 200) size = 200;
+        int offset = (page - 1) * size;
+
+        // 3. 准备查询参数
+        List<Object> params = new ArrayList<>();
+        long currentUserId = auth.getAuthorId();
+
+        // 4. 构建 SQL 语句
+        // 核心思路：通过 JOIN user_follows 表，只筛选 "我关注的人" (uf.followingid) 发的菜谱
+        StringBuilder sqlBuilder = new StringBuilder();
+
+        // Base SQL: 基础筛选条件
+        // r.* 代表查询菜谱的所有字段
+        // uf.followerid = ? 锁定 "粉丝是我" 的记录
+        // r.IsDeleted = FALSE 排除已被软删除的菜谱
+        String baseClause = "FROM recipes r " +
+                "JOIN user_follows uf ON r.authorid = uf.followingid " +
+                "JOIN users u ON r.authorid = u.authorid " +
+                "WHERE uf.followerid = ? ";
+        params.add(currentUserId);
+
+        // Category 过滤 (Optional)
+        if (category != null && !category.trim().isEmpty()) {
+            baseClause += "AND r.RecipeCategory = ? ";
+            params.add(category);
+        }
+
+        // 5. 先查询总数 (Total Count)
+        Long total;
+        try {
+            String countSql = "SELECT COUNT(*) " + baseClause;
+            total = jdbcTemplate.queryForObject(countSql, Long.class, params.toArray());
+
+            // 如果没有关注任何人，或者关注的人没发过符合条件的菜谱，直接返回空
+            if (total == 0L) {
+                return new PageResult<>(new ArrayList<>(), page, size, 0L);
+            }
+        } catch (EmptyResultDataAccessException e) {
+            return new PageResult<>(new ArrayList<>(), page, size, 0L);
+        }
+
+
+        // 6. 查询具体数据 (Data Query)
+        // 排序规则：发布时间倒序 -> ID 倒序 (保证分页稳定性)
+        String querySql = "SELECT r.* , u.authorname " + baseClause +
+                "ORDER BY r.DatePublished DESC, r.RecipeId DESC " +
+                "LIMIT ? OFFSET ?";
+
+        params.add(size);
+        params.add(offset);
+        List<FeedItem> records = jdbcTemplate.query(querySql, feedItemRowMapper, params.toArray());
+        return new PageResult<>(records, page, size, total);
     }
 
     @Override
@@ -317,8 +417,7 @@ public class UserServiceImpl implements UserService {
             Boolean isDeleted = jdbcTemplate.queryForObject(sql, Boolean.class, auth.getAuthorId());
 
             // 检查是否被删除
-            // Boolean.TRUE.equals 可以安全处理 isDeleted 为 null 的情况 (视为未删除)
-            if (Boolean.TRUE.equals(isDeleted)) {
+            if (isDeleted) {
                 throw new SecurityException("User is deleted (inactive).");
             }
 

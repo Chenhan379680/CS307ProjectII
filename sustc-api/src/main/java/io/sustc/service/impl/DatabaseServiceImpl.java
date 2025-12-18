@@ -333,7 +333,19 @@ public class DatabaseServiceImpl implements DatabaseService {
                         "    FOREIGN KEY (FollowerId) REFERENCES users(AuthorId), " +
                         "    FOREIGN KEY (FollowingId) REFERENCES users(AuthorId), " +
                         "    CHECK (FollowerId != FollowingId)" +
-                        ")"
+                        ")",
+                // 创建索引
+                "CREATE INDEX IF NOT EXISTS idx_recipes_rating ON recipes(AggregatedRating)",
+
+                "CREATE INDEX IF NOT EXISTS idx_recipes_date ON recipes(DatePublished)",
+
+                "CREATE INDEX IF NOT EXISTS idx_recipes_category ON recipes(RecipeCategory)",
+
+                "CREATE INDEX IF NOT EXISTS idx_ingr_recipe_id ON recipe_ingredients(RecipeId)",
+
+                "CREATE INDEX IF NOT EXISTS idx_ingr_name ON recipe_ingredients(IngredientPart)",
+
+                "CREATE INDEX IF NOT EXISTS idx_users_name ON users(AuthorName)"
         };
 
         for (String sql : createTableSQLs) {
