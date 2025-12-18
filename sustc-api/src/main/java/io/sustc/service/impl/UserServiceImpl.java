@@ -35,7 +35,24 @@ public class UserServiceImpl implements UserService {
     private JdbcTemplate jdbcTemplate;
 
     private final RowMapper<UserRecord> userRecordRowMapper = new BeanPropertyRowMapper<>(UserRecord.class);
-    private final RowMapper<FeedItem> feedItemRowMapper = new BeanPropertyRowMapper<>(FeedItem.class);
+
+    private final RowMapper<FeedItem> feedItemRowMapper = new RowMapper<FeedItem>() {
+        @Override
+        public FeedItem mapRow(ResultSet rs, int rowNum) throws SQLException {
+            FeedItem item = new FeedItem();
+            item.setRecipeId(rs.getLong("recipeid"));
+            item.setName(rs.getString("name"));
+            item.setAuthorId(rs.getLong("authorid"));
+            item.setAuthorName(rs.getString("authorname"));
+            item.setAggregatedRating(rs.getDouble("aggregatedrating"));
+            item.setReviewCount(rs.getInt("reviewcount"));
+            Timestamp ts = rs.getTimestamp("DatePublished", Calendar.getInstance(TimeZone.getTimeZone("UTC")));
+            if (ts != null) {
+                item.setDatePublished(ts.toInstant());
+            }
+            return item;
+        }
+    };
 
     @Override
     public long register(RegisterUserReq req) {
@@ -376,7 +393,46 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public Map<String, Object> getUserWithHighestFollowRatio() {
-        return null;
+        // SQL 逻辑解释：
+        // 1. user_followers: 统计每个用户的粉丝数 (作为被关注者 FollowingId)
+        // 2. user_followings: 统计每个用户的关注数 (作为关注者 FollowerId)
+        // 3. 主查询: 连接 users 表，计算比率，排序取第一
+
+        String sql = """
+        WITH user_followers AS (
+            SELECT FollowingId, COUNT(*) as cnt 
+            FROM user_follows 
+            GROUP BY FollowingId
+        ),
+        user_followings AS (
+            SELECT FollowerId, COUNT(*) as cnt 
+            FROM user_follows 
+            GROUP BY FollowerId
+        )
+        SELECT 
+            u.AuthorId, 
+            u.AuthorName,
+            CAST(COALESCE(fer.cnt, 0) AS DOUBLE PRECISION) / fing.cnt AS ratio
+        FROM users u
+        JOIN user_followings fing ON u.AuthorId = fing.FollowerId -- 必须有关注数 (Inner Join 自动排除了 count=0)
+        LEFT JOIN user_followers fer ON u.AuthorId = fer.FollowingId -- 粉丝数可以是 0 (Left Join)
+        WHERE u.IsDeleted = FALSE
+        ORDER BY ratio DESC, u.AuthorId ASC
+        LIMIT 1
+        """;
+
+        try {
+            return jdbcTemplate.queryForObject(sql, (rs, rowNum) -> {
+                Map<String, Object> result = new HashMap<>();
+                result.put("AuthorId", rs.getLong("AuthorId"));
+                result.put("AuthorName", rs.getString("AuthorName"));
+                result.put("Ratio", rs.getDouble("ratio"));
+                return result;
+            });
+        } catch (EmptyResultDataAccessException e) {
+            // 如果没有符合条件的用户（例如所有用户都没有关注任何人），返回 null
+            return null;
+        }
     }
 
     public Integer calculateAgeFromBirthday(String birthday) {
