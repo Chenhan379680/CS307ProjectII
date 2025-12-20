@@ -141,7 +141,7 @@ Then zip the `submit` folder (unzip should produce a folder named `submit`, inst
 separated jar).
 
 **Online submission**
-You just need to submit the zip file `submit.zip`, the structure of which is as mentioned above. Each hour you can submit times and the due time is 2025.12.31 23:59.
+You just need to submit the zip file `submit.zip`, the structure of which is as mentioned above. Each hour you can submit 5 times and the due time is 2025.12.31 23:59.
 
 Also, similar to other courses, we require you to submit your source code for academic purposes and plagiarism
 detection. Please run the `clean` task before archiving your source code, which will delete the built files.
