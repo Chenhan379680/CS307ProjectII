@@ -48,7 +48,29 @@ public class RecipeServiceImpl implements RecipeService {
         // 1. 修改 SQL：加入 LEFT JOIN 获取作者名字 (authorName)
         // 就像修复 searchRecipes 一样，这里也需要作者名
         String sql = """
-            SELECT r.*, u.authorname AS authorName
+            SELECT r.recipeid AS RecipeId,
+                   r.name AS name,
+                   r.authorid AS authorId,
+                   u.authorname AS authorName,
+                   r.cooktime AS cookTime,
+                   r.preptime AS prepTime,
+                   r.totaltime AS totalTime,
+                   r.datepublished AS datePublished,
+                   r.description,
+                   r.recipecategory AS recipeCategory,
+                   COALESCE(r.aggregatedRating, 0) as aggregatedRating,
+                   r.reviewcount AS reviewCount,
+                   r.calories,
+                   r.fatcontent AS fatContent,
+                   r.saturatedfatcontent AS saturatedFatContent,
+                   r.cholesterolcontent AS  cholesterolContent,
+                   r.sodiumcontent  AS sodiumContent,
+                   r.carbohydratecontent AS carbohydrateContent,
+                   r.fibercontent  AS fiberContent,
+                   r.sugarcontent AS sugarContent,
+                   r.proteincontent  AS proteinContent,
+                   r.recipeservings AS recipeServings,
+                   r.recipeyield AS recipeYield
             FROM recipes r
             LEFT JOIN users u ON r.authorid = u.authorid
             WHERE r.recipeid = ?
@@ -124,6 +146,7 @@ public class RecipeServiceImpl implements RecipeService {
                     sql.append(" ORDER BY r.calories ASC, r.recipeid DESC ");
                     break;
                 default:
+                    sql.append(" ORDER BY r.recipeid DESC ");
                     break;
             }
         }

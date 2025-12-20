@@ -243,4 +243,5 @@ public interface UserService {
      */
     Map<String, Object> getUserWithHighestFollowRatio();
 
+    void verifyAuth(AuthInfo auth);
 }

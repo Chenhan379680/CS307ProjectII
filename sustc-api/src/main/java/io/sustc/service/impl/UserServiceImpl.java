@@ -36,22 +36,19 @@ public class UserServiceImpl implements UserService {
 
     private final RowMapper<UserRecord> userRecordRowMapper = new BeanPropertyRowMapper<>(UserRecord.class);
 
-    private final RowMapper<FeedItem> feedItemRowMapper = new RowMapper<FeedItem>() {
-        @Override
-        public FeedItem mapRow(ResultSet rs, int rowNum) throws SQLException {
-            FeedItem item = new FeedItem();
-            item.setRecipeId(rs.getLong("recipeid"));
-            item.setName(rs.getString("name"));
-            item.setAuthorId(rs.getLong("authorid"));
-            item.setAuthorName(rs.getString("authorname"));
-            item.setAggregatedRating(rs.getDouble("aggregatedrating"));
-            item.setReviewCount(rs.getInt("reviewcount"));
-            Timestamp ts = rs.getTimestamp("DatePublished", Calendar.getInstance(TimeZone.getTimeZone("UTC")));
-            if (ts != null) {
-                item.setDatePublished(ts.toInstant());
-            }
-            return item;
+    private final RowMapper<FeedItem> feedItemRowMapper = (rs, rowNum) -> {
+        FeedItem item = new FeedItem();
+        item.setRecipeId(rs.getLong("recipeid"));
+        item.setName(rs.getString("name"));
+        item.setAuthorId(rs.getLong("authorid"));
+        item.setAuthorName(rs.getString("authorname"));
+        item.setAggregatedRating(rs.getDouble("aggregatedrating"));
+        item.setReviewCount(rs.getInt("reviewcount"));
+        Timestamp ts = rs.getTimestamp("DatePublished", Calendar.getInstance(TimeZone.getTimeZone("UTC")));
+        if (ts != null) {
+            item.setDatePublished(ts.toInstant());
         }
+        return item;
     };
 
     @Override
@@ -100,25 +97,27 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public long login(AuthInfo auth) {
-       if(auth == null) {
-           return -1L;
-       }
-       if(auth.getPassword() == null || auth.getPassword().isEmpty()) {
-           return -1L;
-       }
-       try {
-           String selectSQL = "SELECT password, isdeleted FROM users WHERE authorid = ?";
-           Map<String, Object> map = jdbcTemplate.queryForMap(selectSQL, auth.getAuthorId());
-           if((Boolean) map.get("isdeleted")) {
-               return -1L;
-           }
-           if (map.get("password") == null || !map.get("password").toString().equals(auth.getPassword())) {
-               return -1L;
-           }
-           return auth.getAuthorId();
-       } catch (EmptyResultDataAccessException e) {
-           return -1L;
-       }
+        if (auth == null || auth.getAuthorId() <= 0 || auth.getPassword() == null || auth.getPassword().isEmpty()) {
+            return -1L;
+        }
+        try {
+            String selectSQL = "SELECT password, isdeleted FROM users WHERE authorid = ?";
+            Map<String, Object> userData = jdbcTemplate.queryForMap(selectSQL, auth.getAuthorId());
+            Boolean isDeleted = (Boolean) userData.get("isdeleted");
+            if (isDeleted != null && isDeleted) {
+                return -1L;
+            }
+            String dbPassword = (String) userData.get("password");
+            if (dbPassword == null || !dbPassword.equals(auth.getPassword())) {
+                return -1L;
+            }
+            return auth.getAuthorId();
+        } catch (EmptyResultDataAccessException e) {
+            return -1L;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return -1L;
+        }
     }
 
     @Override
@@ -233,7 +232,7 @@ public class UserServiceImpl implements UserService {
                     String updateTargetCount = "UPDATE users SET followers = COALESCE(followers, 0) - 1 WHERE authorid = ?";
                     jdbcTemplate.update(updateTargetCount, followeeId);
 
-                    return true;
+                    return false;
                 }
                 return false;
             } else {
@@ -462,24 +461,11 @@ public class UserServiceImpl implements UserService {
         return "Unknown";
     }
 
+    @Override
     public void verifyAuth(AuthInfo auth) {
-        if (auth == null) {
-            throw new SecurityException();
-        }
-        String sql = "SELECT IsDeleted FROM users WHERE AuthorId = ?";
-
-        try {
-            // queryForObject 查询单列
-            Boolean isDeleted = jdbcTemplate.queryForObject(sql, Boolean.class, auth.getAuthorId());
-
-            // 检查是否被删除
-            if (isDeleted) {
-                throw new SecurityException("User is deleted (inactive).");
-            }
-
-        } catch (EmptyResultDataAccessException e) {
-            // 如果数据库里没有这个 AuthorId
-            throw new SecurityException("User does not exist.");
+        long result = login(auth);
+        if (result <= 0) {
+            throw new SecurityException("Authentication failed: Invalid user ID or password.");
         }
     }
 }
