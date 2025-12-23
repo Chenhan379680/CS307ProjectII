@@ -48,8 +48,6 @@ public class RecipeServiceImpl implements RecipeService {
             throw new IllegalArgumentException();
         }
 
-        // 1. 修改 SQL：加入 LEFT JOIN 获取作者名字 (authorName)
-        // 就像修复 searchRecipes 一样，这里也需要作者名
         String sql = """
             SELECT r.recipeid AS RecipeId,
                    r.name AS name,

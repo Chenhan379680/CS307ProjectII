@@ -240,7 +240,7 @@ public class ReviewServiceImpl implements ReviewService {
         int offset = (page - 1) * size;
         if (total == 0) {
             // 如果没有数据，直接返回空结果，省去后面的查询
-            return new PageResult<>(new ArrayList<ReviewRecord>(), size, offset, total);
+            return new PageResult<>(new ArrayList<>(), size, offset, total);
         }
 
         String sql = """
