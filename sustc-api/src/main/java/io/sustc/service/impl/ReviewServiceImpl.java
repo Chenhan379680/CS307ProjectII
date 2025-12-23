@@ -55,7 +55,6 @@ public class ReviewServiceImpl implements ReviewService {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         Timestamp now = Timestamp.from(Instant.now());
         jdbcTemplate.update(connection -> {
-            // 指定 RETURN_GENERATED_KEYS 以获取自增 ID
             PreparedStatement ps = connection.prepareStatement(insertSQL, new String[]{"reviewid"});
             ps.setLong(1, recipeId);
             ps.setLong(2, auth.getAuthorId());
@@ -112,7 +111,7 @@ public class ReviewServiceImpl implements ReviewService {
             throw new IllegalArgumentException("Review does not belong to this recipe");
         }
         if (actualAuthorId != auth.getAuthorId()) {
-            throw new SecurityException("Not author"); // 这里抛出了，Benchmark 就会得到 true
+            throw new SecurityException("Not author");
         }
 
         // 5. 执行更新
@@ -141,7 +140,6 @@ public class ReviewServiceImpl implements ReviewService {
         try {
             reviewData = jdbcTemplate.queryForMap(sql, reviewId);
         } catch (EmptyResultDataAccessException e) {
-            // 如果评论不存在，抛出参数错误
             throw new IllegalArgumentException("Review does not exist");
         }
 
@@ -153,7 +151,7 @@ public class ReviewServiceImpl implements ReviewService {
             throw new IllegalArgumentException("Review does not belong to this recipe");
         }
         if (actualAuthorId != auth.getAuthorId()) {
-            throw new SecurityException("Not author"); // 这里抛出了，Benchmark 就会得到 true
+            throw new SecurityException("Not author");
         }
 
         String updateSql = """

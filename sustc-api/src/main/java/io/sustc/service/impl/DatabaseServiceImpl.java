@@ -91,6 +91,10 @@ public class DatabaseServiceImpl implements DatabaseService {
                     if (++i % 2000 == 0) ps.executeBatch();
                 }
                 ps.executeBatch();
+
+                try (Statement stmt = conn.createStatement()) {
+                    stmt.execute("SELECT setval('recipes_recipeid_seq', (SELECT MAX(Recipeid) FROM recipes))");
+                }
             }
 
             String reviewSQL = "INSERT INTO reviews (ReviewId, RecipeId, AuthorId, Rating, Review, DateSubmitted, DateModified, LikesCount) " +
@@ -214,7 +218,7 @@ public class DatabaseServiceImpl implements DatabaseService {
 
 
                 "CREATE TABLE IF NOT EXISTS recipes " +
-                        "(RecipeId BIGINT PRIMARY KEY," +
+                        "(RecipeId BIGSERIAL PRIMARY KEY," +
                         " Name VARCHAR(500)," +
                         " AuthorId BIGINT," +
                         " CookTime VARCHAR(50)," +
