@@ -1,20 +1,48 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/sustc  # change this to your own jdbc url
-    username: sustc  # change this to your own username (avoid using a superuser)
-    password: sustc  # change this to your own password
-
+    url: jdbc:postgresql://localhost:5432/sustc
+    username: sustc
+    password: sustc
     hikari:
-      connection-timeout: 180000
-      leak-detection-threshold: 120000
+      # 连接池配置保持不变
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 5000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      keepalive-time: 300000
+      leak-detection-threshold: 10000
+
+  # 添加Spring MVC配置
+  mvc:
+    # 静态资源路径映射（默认就是/static/**）
+    static-path-pattern: /static/**
+
+  # 静态资源位置
+  resources:
+    static-locations: classpath:/static/
+
+  # 允许小写（如果你的API路径中有大写）
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+
+# 添加Spring Security配置（如果没有使用Spring Security，可以跳过）
+# 但如果你有Security，需要配置：
+security:
+  basic:
+    enabled: false
 
 logging:
   level:
     root: off
     io.sustc: debug
 
----
-
 benchmark:
   data-path: data
   student-mode: true
+
+# 服务器配置
+server:
+  port: 8080
+  servlet:
+    context-path: /  # 默认为根路径
