@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Recipe Detail</title>
+    <style>
+        body { font-family: system-ui, Arial; margin: 24px; max-width: 1100px; }
+        .row { display:flex; gap:12px; flex-wrap: wrap; align-items: center; }
+        input, button { padding: 8px 10px; }
+        button { cursor: pointer; }
+        button:disabled { opacity: .5; cursor: not-allowed; }
+        a { color: inherit; }
+
+        .card { border:1px solid #eee; padding:12px; border-radius: 12px; margin: 12px 0; background: #fff; }
+        .ok { color: #0a7; }
+        .bad { color: #c00; }
+        .muted { color:#777; }
+        .pill { font-size: 12px; padding: 2px 10px; border: 1px solid #ddd; border-radius: 999px; background: #fafafa; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .btn2 { border: 1px solid #ddd; background: #fff; border-radius: 10px; }
+        .btnPrimary { border: 1px solid #0a7; background: #0a7; color: #fff; border-radius: 10px; }
+        .reviewItem { border:1px solid #eee; border-radius: 12px; padding: 10px; margin: 10px 0; background: #fff; }
+        .small { font-size: 12px; }
+
+        .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+
+        .titleRow { display:flex; gap:12px; align-items: baseline; flex-wrap: wrap; }
+        .titleRow h2 { margin: 8px 0; }
+        .h3 { margin-top: 18px; margin-bottom: 8px; }
+
+        .kv { display:grid; grid-template-columns: 140px 1fr; gap: 8px 12px; }
+        @media (max-width: 520px) { .kv { grid-template-columns: 110px 1fr; } }
+        .k { color:#666; font-size: 12px; }
+        .v { color:#111; }
+        .divider { height:1px; background:#eee; margin: 10px 0; }
+
+        .chips { display:flex; flex-wrap: wrap; gap: 8px; }
+        .chip { border:1px solid #eee; background:#fafafa; padding:6px 10px; border-radius: 999px; font-size: 12px; }
+
+        .nutGrid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        @media (max-width: 860px) { .nutGrid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 520px) { .nutGrid { grid-template-columns: 1fr; } }
+        .nutItem { border:1px solid #eee; border-radius: 12px; padding: 10px; background:#fff; }
+        .nutItem .label { font-size: 12px; color:#666; }
+        .nutItem .val { font-size: 16px; margin-top: 6px; font-weight: 600; }
+    </style>
+</head>
+
+<body>
+
+<div class="row">
+    <a href="index.html">← 返回搜索</a>
+    <span style="margin-left:auto" id="loginPill" class="pill">未登录</span>
+</div>
+
+<div class="titleRow">
+    <h2>Recipe Detail</h2>
+    <span class="pill mono" id="ridPill">#?</span>
+</div>
+
+<div class="card">
+    <div class="row">
+        <span>recipeId:</span>
+        <input id="rid" style="width:120px;" />
+        <button class="btnPrimary" onclick="loadAll()">加载</button>
+        <span id="msg"></span>
+    </div>
+</div>
+
+<div class="h3"><b>Recipe</b></div>
+<div id="recipeBox" class="card">(empty)</div>
+
+<div class="h3"><b>Reviews</b></div>
+
+<div class="card">
+    <div class="row">
+        <span>page</span><input id="page" type="number" value="1" style="width:90px;">
+        <span>size</span><input id="size" type="number" value="5" style="width:90px;">
+        <button class="btn2" onclick="loadReviews()">刷新 Reviews</button>
+        <span class="muted small">（page 从 1 开始）</span>
+    </div>
+</div>
+
+<div class="card">
+    <div class="row">
+        <b>发评论（需登录）</b>
+        <span id="needLoginTip" class="muted small"></span>
+    </div>
+    <div class="row" style="margin-top:8px;">
+        <input id="newRating" type="number" min="0" max="5" step="1" value="5" style="width:90px;">
+        <input id="newText" placeholder="review text" style="width:520px;">
+        <button id="btnAddReview" class="btnPrimary" onclick="addReview()" disabled>提交</button>
+    </div>
+</div>
+
+<div id="reviewList"></div>
+
+<script>
+    const BASE = "";
+
+    // ---------------- Auth ----------------
+    function getAuth() {
+      const author_id = localStorage.getItem("author_id");
+      const password = localStorage.getItem("password");
+      if (!author_id || !password) return null;
+      return { author_id, password };
+    }
+
+    function authHeaders() {
+      const a = getAuth();
+      if (!a) return {};
+      return { "author_id": a.author_id, "password": a.password };
+    }
+
+    function setAuthUI() {
+      const a = getAuth();
+      const pill = document.getElementById("loginPill");
+      const tip = document.getElementById("needLoginTip");
+      const btn = document.getElementById("btnAddReview");
+
+      if (!a) {
+        pill.textContent = "未登录";
+        pill.style.borderColor = "#ddd";
+        pill.style.color = "#777";
+        tip.textContent = "未登录：请回到 index.html 注册/登录后再回来";
+        btn.disabled = true;
+      } else {
+        pill.textContent = `已登录: ${a.author_id}`;
+        pill.style.borderColor = "#0a7";
+        pill.style.color = "#0a7";
+        tip.textContent = `当前登录：author_id=${a.author_id}`;
+        btn.disabled = false;
+      }
+    }
+
+    async function request(path, method="GET", body=null, useAuth=false) {
+      const headers = {};
+      if (body !== null) headers["Content-Type"] = "application/json";
+      if (useAuth) Object.assign(headers, authHeaders());
+      const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : null });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+      if (!res.ok) throw { status: res.status, data };
+      return data;
+    }
+
+    function qs(name) {
+      return new URLSearchParams(location.search).get(name);
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? "")
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    // ---------------- Format helpers ----------------
+    function fmtNum(x, digits=1) {
+      if (x === null || x === undefined || x === "") return "-";
+      const n = Number(x);
+      if (Number.isNaN(n)) return String(x);
+      return n.toFixed(digits);
+    }
+
+    function fmtDate(ms) {
+      if (!ms && ms !== 0) return "-";
+      const n = Number(ms);
+      if (!Number.isFinite(n) || n <= 0) return "-";
+      const d = new Date(n);
+      if (isNaN(d.getTime())) return "-";
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,"0");
+      const day = String(d.getDate()).padStart(2,"0");
+      return `${y}-${m}-${day}`;
+    }
+
+    // 解析 "PT2H30M4S" 这类 ISO Duration
+    function parseISODurationToText(iso) {
+      if (!iso) return "-";
+      const s = String(iso);
+      if (!s.startsWith("PT")) return s;
+      const h = (s.match(/(\d+)H/)||[])[1] ?? "0";
+      const m = (s.match(/(\d+)M/)||[])[1] ?? "0";
+      const sec = (s.match(/(\d+)S/)||[])[1] ?? "0";
+      const hh = Number(h), mm = Number(m), ss = Number(sec);
+      const parts = [];
+      if (hh) parts.push(`${hh}h`);
+      if (mm) parts.push(`${mm}m`);
+      if (ss) parts.push(`${ss}s`);
+      return parts.length ? parts.join(" ") : "0m";
+    }
+
+    // ---------------- Data loading ----------------
+    async function loadRecipe() {
+      const rid = document.getElementById("rid").value.trim();
+      return request(`/recipes/${rid}`);
+    }
+
+    function renderRecipe(r) {
+      const rid = r?.recipeId ?? r?.id ?? "";
+      document.getElementById("ridPill").textContent = `#${rid || "?"}`;
+
+      const name = escapeHtml(r?.name ?? "");
+      const category = escapeHtml(r?.recipeCategory ?? "");
+      const authorName = escapeHtml(r?.authorName ?? "");
+      const authorId = r?.authorId ?? "";
+      const rating = r?.aggregatedRating ?? "-";
+      const reviewCount = r?.reviewCount ?? "-";
+      const datePub = fmtDate(r?.datePublished);
+
+      const cook = parseISODurationToText(r?.cookTime);
+      const prep = parseISODurationToText(r?.prepTime);
+      const total = parseISODurationToText(r?.totalTime);
+
+      const desc = escapeHtml(r?.description ?? "");
+      const ing = Array.isArray(r?.recipeIngredientParts) ? r.recipeIngredientParts : [];
+      const ingHtml = ing.length
+        ? `<div class="chips">${ing.map(x => `<span class="chip">${escapeHtml(x)}</span>`).join("")}</div>`
+        : `<span class="muted">（无配料信息）</span>`;
+
+      const servings = (r?.recipeServings ?? r?.servings ?? "-");
+      const yieldText = escapeHtml(r?.recipeYield ?? "");
+
+      const nutrition = [
+        ["Calories", r?.calories, ""],
+        ["Fat", r?.fatContent, "g"],
+        ["Saturated fat", r?.saturatedFatContent, "g"],
+        ["Cholesterol", r?.cholesterolContent, "mg"],
+        ["Sodium", r?.sodiumContent, "mg"],
+        ["Carbohydrate", r?.carbohydrateContent, "g"],
+        ["Fiber", r?.fiberContent, "g"],
+        ["Sugar", r?.sugarContent, "g"],
+        ["Protein", r?.proteinContent, "g"],
+      ];
+
+      const nutHtml = `
+        <div class="nutGrid">
+          ${nutrition.map(([k, v, unit]) => `
+            <div class="nutItem">
+              <div class="label">${escapeHtml(k)}</div>
+              <div class="val">${fmtNum(v, 1)} ${escapeHtml(unit)}</div>
+            </div>
+          `).join("")}
+        </div>
+      `;
+
+      document.getElementById("recipeBox").innerHTML = `
+        <div class="row" style="justify-content: space-between;">
+          <div style="min-width: 280px;">
+            <div style="font-size: 20px; font-weight: 700;">${name || "(no name)"}</div>
+            <div class="row" style="margin-top: 8px;">
+              ${category ? `<span class="pill">Category: ${category}</span>` : `<span class="pill">Category: -</span>`}
+              <span class="pill">Rating: ${fmtNum(rating, 1)} (${reviewCount} reviews)</span>
+              <span class="pill">Published: ${datePub}</span>
+            </div>
+          </div>
+
+          <div class="row" style="justify-content:flex-end;">
+            <span class="pill">Author: ${authorName || "-"} (${authorId || "-"})</span>
+            <span class="pill mono">ID: ${rid || "-"}</span>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="grid2">
+          <div class="card" style="margin:0;">
+            <b>Time</b>
+            <div style="margin-top:10px;" class="kv">
+              <div class="k">Prep</div><div class="v">${escapeHtml(prep)}</div>
+              <div class="k">Cook</div><div class="v">${escapeHtml(cook)}</div>
+              <div class="k">Total</div><div class="v">${escapeHtml(total)}</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin:0;">
+            <b>Servings</b>
+            <div style="margin-top:10px;" class="kv">
+              <div class="k">recipeServings</div><div class="v">${escapeHtml(servings)}</div>
+              <div class="k">recipeYield</div><div class="v">${yieldText || "-"}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div>
+          <b>Description</b>
+          <div style="margin-top:8px; line-height: 1.5;">
+            ${desc || `<span class="muted">（无描述）</span>`}
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div>
+          <b>Ingredients</b>
+          <div style="margin-top:10px;">${ingHtml}</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div>
+          <b>Nutrition</b>
+          <div style="margin-top:10px;">${nutHtml}</div>
+        </div>
+      `;
+    }
+
+    function renderReviews(pageObj) {
+      const items = pageObj?.items ?? [];
+      const total = pageObj?.total ?? 0;
+      const page = pageObj?.page ?? "?";
+      const size = pageObj?.size ?? "?";
+
+      if (items.length === 0) {
+        document.getElementById("reviewList").innerHTML =
+          `<div class="muted">（暂无 reviews） total=${total}, page=${page}, size=${size}</div>`;
+        return;
+      }
+
+      const a = getAuth();
+      const myId = a ? String(a.author_id) : null;
+      const rid = document.getElementById("rid").value.trim();
+
+      const html = items.map(x => {
+        const reviewId = x.reviewId ?? x.id ?? "";
+        const authorId = x.authorId ?? "";
+        const authorName = escapeHtml(x.authorName ?? "");
+        const rating = x.rating ?? "";
+        const text = escapeHtml(x.review ?? "");
+        const likes = x.likes ?? null;
+
+        let likeCountText = "";
+        if (Array.isArray(likes)) likeCountText = `${likes.length}`;
+        else if (typeof likes === "number") likeCountText = `${likes}`;
+        else likeCountText = "-";
+
+        const canDelete = myId && String(authorId) === myId; // 作者可删（前端提示，后端再校验）
+
+        const ops = a ? `
+          <div class="row" style="margin-top:8px;">
+            <button type="button" class="btn2" onclick="likeReview('${reviewId}')">Like</button>
+            <button type="button" class="btn2" onclick="unlikeReview('${reviewId}')">Unlike</button>
+            <button type="button" class="btn2" onclick="editReviewPrompt('${reviewId}', '${rid}')" ${canDelete ? "" : "disabled"}>Edit</button>
+            <button type="button" class="btn2" onclick="deleteReview('${reviewId}', '${rid}')" ${canDelete ? "" : "disabled"}>Delete</button>
+            <span class="muted small">Edit/Delete 仅作者可点</span>
+          </div>
+        ` : `<div class="muted small" style="margin-top:8px;">（登录后可 Like/Unlike/Edit/Delete）</div>`;
+
+        return `
+          <div class="reviewItem">
+            <div class="row">
+              <b class="mono">#${reviewId}</b>
+              <span class="pill">rating: ${rating}</span>
+              <span class="pill">likes: ${likeCountText}</span>
+              <span class="muted small" style="margin-left:auto">author: ${authorName} (${authorId})</span>
+            </div>
+            <div style="margin-top:8px; line-height: 1.5;">${text || `<span class="muted">(empty)</span>`}</div>
+            ${ops}
+          </div>
+        `;
+      }).join("");
+
+      document.getElementById("reviewList").innerHTML =
+        `<div class="muted small">total=${total}, page=${page}, size=${size}</div>` + html;
+    }
+
+    async function loadReviews() {
+      const rid = document.getElementById("rid").value.trim();
+      const page = document.getElementById("page").value || "1";
+      const size = document.getElementById("size").value || "5";
+      const res = await request(`/recipes/${rid}/reviews?page=${page}&size=${size}`);
+      renderReviews(res);
+      return res;
+    }
+
+    async function loadAll() {
+      const msg = document.getElementById("msg");
+      msg.textContent = "加载中...";
+      msg.className = "";
+
+      try {
+        const r = await loadRecipe();
+        renderRecipe(r);
+        await loadReviews();
+        msg.textContent = "OK";
+        msg.className = "ok";
+      } catch (e) {
+        msg.textContent = `ERROR ${e.status}: ${JSON.stringify(e.data)}`;
+        msg.className = "bad";
+      }
+    }
+
+    // ---------------- Actions ----------------
+    async function addReview() {
+      const rid = document.getElementById("rid").value.trim();
+      const rating = Number(document.getElementById("newRating").value || "5");
+      const review = document.getElementById("newText").value.trim();
+      if (!review) { alert("review 不能为空"); return; }
+
+      try {
+        const reviewId = await request(`/recipes/${rid}/reviews`, "POST", { rating, review }, true);
+        document.getElementById("newText").value = "";
+        alert(`评论成功！reviewId=${reviewId}`);
+        await loadReviews();
+      } catch (e) {
+        alert(`评论失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+    async function likeReview(reviewId) {
+      try {
+        const id = encodeURIComponent(String(reviewId));
+        await request(`/reviews/${id}/like`, "POST", null, true);
+        await loadReviews();
+      } catch (e) {
+        alert(`like 失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+
+    async function unlikeReview(reviewId) {
+      try {
+        const id = encodeURIComponent(String(reviewId));
+        await request(`/reviews/${id}/unlike`, "POST", null, true);
+        await loadReviews();
+      } catch (e) {
+        alert(`unlike 失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+
+    async function deleteReview(reviewId, recipeId) {
+      if (!confirm(`确认删除 reviewId=${reviewId}?`)) return;
+      try {
+        const rid = encodeURIComponent(String(recipeId));
+        const id  = encodeURIComponent(String(reviewId));
+        await request(`/recipes/${rid}/reviews/${id}`, "DELETE", null, true);
+        await loadReviews();
+      } catch (e) {
+        alert(`delete 失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+
+    async function editReviewPrompt(reviewId, recipeId) {
+      const ratingStr = prompt("new rating (0~5)?", "5");
+      if (ratingStr === null) return;
+      const text = prompt("new review text?", "updated from GUI");
+      if (text === null) return;
+
+      const rating = Number(ratingStr || "5");
+      try {
+        const rid = encodeURIComponent(String(recipeId));
+        const id  = encodeURIComponent(String(reviewId));
+        await request(`/recipes/${rid}/reviews/${id}`, "PUT", { rating, review: text }, true);
+        await loadReviews();
+      } catch (e) {
+        alert(`edit 失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+
+
+    // init
+    setAuthUI();
+    const id = qs("id") || "1";
+    document.getElementById("rid").value = id;
+    loadAll();
+</script>
+
+</body>
+</html>

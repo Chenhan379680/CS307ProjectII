@@ -15,8 +15,6 @@ spring:
 
   # 添加Spring MVC配置
   mvc:
-    # 静态资源路径映射（默认就是/static/**）
-    static-path-pattern: /static/**
 
   # 静态资源位置
   resources:

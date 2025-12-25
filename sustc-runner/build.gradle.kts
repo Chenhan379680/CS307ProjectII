@@ -14,7 +14,9 @@ dependencies {
             .takeIf { !it.isEmpty } ?: project(":sustc-api")
     )
     runtimeOnly("org.postgresql:postgresql")
-
+    implementation(project(":sustc-api"))
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.apache.commons:commons-lang3")
     implementation("com.fasterxml.jackson.core:jackson-databind")
     implementation("org.furyio:fury-core:0.3.1")

@@ -9,7 +9,7 @@ import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.shell.ShellApplicationRunner;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "io.sustc")
 @Slf4j
 public class Application {
 
