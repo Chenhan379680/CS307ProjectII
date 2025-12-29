@@ -146,7 +146,7 @@ public class DatabaseServiceImpl implements DatabaseService {
                 for (ReviewRecord r : reviewRecords) {
                     if (r.getLikes() != null && r.getLikes().length > 0) {
                         Set<Long> uniqueLikes = new HashSet<>();
-                        for(long id : r.getLikes()) uniqueLikes.add(id);
+                        for (long id : r.getLikes()) uniqueLikes.add(id);
 
                         for (Long likeAuthorId : uniqueLikes) {
                             ps.setLong(1, r.getReviewId());
@@ -165,15 +165,15 @@ public class DatabaseServiceImpl implements DatabaseService {
             try (Statement stmt = conn.createStatement()) {
                 log.info("Updating LikesCount in bulk...");
                 stmt.execute("""
-                    UPDATE reviews r
-                    SET LikesCount = s.cnt
-                    FROM (
-                        SELECT ReviewId, COUNT(*) as cnt
-                        FROM review_likes
-                        GROUP BY ReviewId
-                    ) s
-                    WHERE r.ReviewId = s.ReviewId
-                """);
+                            UPDATE reviews r
+                            SET LikesCount = s.cnt
+                            FROM (
+                                SELECT ReviewId, COUNT(*) as cnt
+                                FROM review_likes
+                                GROUP BY ReviewId
+                            ) s
+                            WHERE r.ReviewId = s.ReviewId
+                        """);
             }
 
             String userfollowsSQL = "INSERT INTO user_follows (FollowerId, FollowingId) VALUES (?, ?) ON CONFLICT DO NOTHING";
@@ -282,37 +282,168 @@ public class DatabaseServiceImpl implements DatabaseService {
 
     private void createIndexesAndTriggers() {
         String[] sqls = {
-                "CREATE INDEX IF NOT EXISTS idx_recipes_rating ON recipes(AggregatedRating)",
-                "CREATE INDEX IF NOT EXISTS idx_recipes_date ON recipes(DatePublished)",
-                "CREATE INDEX IF NOT EXISTS idx_recipes_category ON recipes(RecipeCategory)",
-                "CREATE INDEX IF NOT EXISTS idx_ingr_recipe_id ON recipe_ingredients(RecipeId)",
-                "CREATE INDEX IF NOT EXISTS idx_ingr_name ON recipe_ingredients(IngredientPart)",
-                "CREATE INDEX IF NOT EXISTS idx_users_name ON users(AuthorName)",
-                // 触发器函数
+
+                // =========================
+                // 1) Indexes
+                // =========================
+                "CREATE INDEX IF NOT EXISTS idx_recipes_rating ON recipes(aggregatedrating)",
+                "CREATE INDEX IF NOT EXISTS idx_recipes_date ON recipes(datepublished)",
+                "CREATE INDEX IF NOT EXISTS idx_recipes_calories ON recipes(calories)",
+                "CREATE INDEX IF NOT EXISTS idx_recipes_name ON recipes(name)",
+                "CREATE INDEX IF NOT EXISTS idx_recipes_category ON recipes(recipecategory)",
+                "CREATE INDEX IF NOT EXISTS idx_ingr_recipe_id ON recipe_ingredients(recipeid)",
+                "CREATE INDEX IF NOT EXISTS idx_ingr_name ON recipe_ingredients(ingredientpart)",
+                "CREATE INDEX IF NOT EXISTS idx_users_name ON users(authorname)",
+                "CREATE INDEX IF NOT EXISTS idx_user_follows_follower ON user_follows(followerid)",
+                "CREATE INDEX IF NOT EXISTS idx_user_follows_following ON user_follows(followingid)",
+                "CREATE INDEX IF NOT EXISTS idx_recipes_author_date ON recipes(authorid, datepublished DESC, recipeid DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_reviews_recipe_date ON reviews(recipeid, datemodified DESC, reviewid DESC)",
+                "CREATE INDEX IF NOT EXISTS idx_reviews_recipe_likes ON reviews(recipeid, likescount DESC, datemodified DESC, reviewid DESC)",
+
+
+                // =========================
+                // 2) Trigger: maintain LikesCount
+                // =========================
                 """
             CREATE OR REPLACE FUNCTION update_like_count() RETURNS TRIGGER AS $$
             BEGIN
                 IF (TG_OP = 'INSERT') THEN
-                    UPDATE reviews SET LikesCount = LikesCount + 1 WHERE ReviewId = NEW.ReviewId;
+                    UPDATE reviews SET likescount = COALESCE(likescount, 0) + 1 WHERE reviewid = NEW.reviewid;
                     RETURN NEW;
                 ELSIF (TG_OP = 'DELETE') THEN
-                    UPDATE reviews SET LikesCount = LikesCount - 1 WHERE ReviewId = OLD.ReviewId;
+                    UPDATE reviews SET likescount = GREATEST(COALESCE(likescount, 0) - 1, 0) WHERE reviewid = OLD.reviewid;
                     RETURN OLD;
                 END IF;
                 RETURN NULL;
             END;
             $$ LANGUAGE plpgsql;
             """,
-                // 绑定触发器
                 """
             DROP TRIGGER IF EXISTS trg_update_like_count ON review_likes;
             CREATE TRIGGER trg_update_like_count
             AFTER INSERT OR DELETE ON review_likes
             FOR EACH ROW EXECUTE FUNCTION update_like_count();
+            """,
+
+
+                // =========================
+                // 3) NEW Trigger: maintain followers/following counts by DB
+                // =========================
+                """
+            CREATE OR REPLACE FUNCTION update_follow_counts() RETURNS TRIGGER AS $$
+            BEGIN
+                IF (TG_OP = 'INSERT') THEN
+                    UPDATE users
+                    SET following = COALESCE(following, 0) + 1
+                    WHERE authorid = NEW.followerid;
+
+                    UPDATE users
+                    SET followers = COALESCE(followers, 0) + 1
+                    WHERE authorid = NEW.followingid;
+
+                    RETURN NEW;
+
+                ELSIF (TG_OP = 'DELETE') THEN
+                    UPDATE users
+                    SET following = GREATEST(COALESCE(following, 0) - 1, 0)
+                    WHERE authorid = OLD.followerid;
+
+                    UPDATE users
+                    SET followers = GREATEST(COALESCE(followers, 0) - 1, 0)
+                    WHERE authorid = OLD.followingid;
+
+                    RETURN OLD;
+                END IF;
+
+                RETURN NULL;
+            END;
+            $$ LANGUAGE plpgsql;
+            """,
+                """
+            DROP TRIGGER IF EXISTS trg_update_follow_counts ON user_follows;
+            CREATE TRIGGER trg_update_follow_counts
+            AFTER INSERT OR DELETE ON user_follows
+            FOR EACH ROW EXECUTE FUNCTION update_follow_counts();
+            """,
+
+
+                // =========================
+                // 4) View: follow ratio (for highest follow ratio query)
+                // =========================
+                """
+            CREATE OR REPLACE VIEW v_follow_ratio AS
+            WITH user_followers AS (
+                SELECT followingid, COUNT(*) AS followers_cnt
+                FROM user_follows
+                GROUP BY followingid
+            ),
+            user_followings AS (
+                SELECT followerid, COUNT(*) AS following_cnt
+                FROM user_follows
+                GROUP BY followerid
+            )
+            SELECT
+                u.authorid,
+                u.authorname,
+                (COALESCE(ufr.followers_cnt, 0)::float8 / ufg.following_cnt::float8) AS ratio
+            FROM users u
+            JOIN user_followings ufg ON u.authorid = ufg.followerid
+            LEFT JOIN user_followers ufr ON u.authorid = ufr.followingid
+            WHERE u.isdeleted = FALSE;
+            """,
+
+
+                // =========================
+                // 5) Function skeleton: closest calorie pair
+                //    (Complete function body inserted; call: SELECT * FROM get_closest_calorie_pair();
+                // =========================
+                """
+            CREATE OR REPLACE FUNCTION get_closest_calorie_pair()
+            RETURNS TABLE(
+                "RecipeA" BIGINT,
+                "RecipeB" BIGINT,
+                "CaloriesA" FLOAT8,
+                "CaloriesB" FLOAT8,
+                "Difference" FLOAT8
+            )
+            LANGUAGE sql
+            AS $$
+                WITH SortedRecipes AS (
+                    SELECT recipeid, calories
+                    FROM recipes
+                    WHERE calories IS NOT NULL
+                    ORDER BY calories ASC
+                ),
+                AdjacentPairs AS (
+                    SELECT
+                        recipeid AS id1,
+                        calories AS cal1,
+                        LEAD(recipeid) OVER (ORDER BY calories ASC) AS id2,
+                        LEAD(calories) OVER (ORDER BY calories ASC) AS cal2
+                    FROM SortedRecipes
+                )
+                SELECT
+                    CAST(LEAST(id1, id2) AS BIGINT) AS "RecipeA",
+                    CAST(GREATEST(id1, id2) AS BIGINT) AS "RecipeB",
+                    CAST((CASE WHEN id1 < id2 THEN cal1 ELSE cal2 END) AS FLOAT8) AS "CaloriesA",
+                    CAST((CASE WHEN id1 < id2 THEN cal2 ELSE cal1 END) AS FLOAT8) AS "CaloriesB",
+                    CAST(ABS(cal1 - cal2) AS FLOAT8) AS "Difference"
+                FROM AdjacentPairs
+                WHERE id2 IS NOT NULL
+                ORDER BY
+                    "Difference" ASC,
+                    "RecipeA" ASC,
+                    "RecipeB" ASC
+                LIMIT 1;
+            $$;
             """
         };
-        for (String sql : sqls) jdbcTemplate.execute(sql);
+
+        for (String sql : sqls) {
+            jdbcTemplate.execute(sql);
+        }
     }
+
 
     @Override
     public void drop() {

@@ -119,7 +119,6 @@ public class UserServiceImpl implements UserService {
             return -1L;
         }
     }
-
     @Override
     public boolean deleteAccount(AuthInfo auth, long userId) {
         // 1. 验证操作者身份
@@ -143,119 +142,63 @@ public class UserServiceImpl implements UserService {
             return false;
         }
 
-        // ================== 核心修改开始 ==================
-
-        // 4.1 获取需要更新计数器的用户列表
-        // 找出 "我关注的人" (他们的粉丝数需要 -1)
-        String findFollowingSql = "SELECT followingid FROM user_follows WHERE followerid = ?";
-        List<Long> followingIds = jdbcTemplate.queryForList(findFollowingSql, Long.class, userId);
-
-        // 找出 "关注我的人" (他们的关注数需要 -1)
-        String findFollowersSql = "SELECT followerid FROM user_follows WHERE followingid = ?";
-        List<Long> followerIds = jdbcTemplate.queryForList(findFollowersSql, Long.class, userId);
-
-        // 4.2 批量更新 "我关注的人" 的粉丝数 (FollowerCount - 1)
-        if (!followingIds.isEmpty()) {
-            String updateFollowerCountSql = "UPDATE users SET followers = COALESCE(followers, 0) - 1 WHERE AuthorId = ?";
-            jdbcTemplate.batchUpdate(updateFollowerCountSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
-                @Override
-                public void setValues(java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
-                    ps.setLong(1, followingIds.get(i));
-                }
-                @Override
-                public int getBatchSize() {
-                    return followingIds.size();
-                }
-            });
-        }
-
-        // 4.3 批量更新 "关注我的人" 的关注数 (FollowingCount - 1)
-        if (!followerIds.isEmpty()) {
-            String updateFollowingCountSql = "UPDATE users SET following = COALESCE(following, 0) - 1 WHERE AuthorId = ?";
-            jdbcTemplate.batchUpdate(updateFollowingCountSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
-                @Override
-                public void setValues(java.sql.PreparedStatement ps, int i) throws java.sql.SQLException {
-                    ps.setLong(1, followerIds.get(i));
-                }
-                @Override
-                public int getBatchSize() {
-                    return followerIds.size();
-                }
-            });
-        }
-
-        // 5. 现在可以安全地清理关注关系表了
+        // 4. 清理关注关系（触发器会自动维护 followers/following 计数）
         String clearFollowsSql = "DELETE FROM user_follows WHERE followerid = ? OR followingid = ?";
         jdbcTemplate.update(clearFollowsSql, userId, userId);
 
-        // 6. 执行用户软删除
-        // 可以在此处顺便把被删除用户的 Follower/Following Count 归零，或者保留原样（取决于业务需求），通常保留原样即可，因为已标记删除
+        // 5. 执行用户软删除
         String deleteUserSql = "UPDATE users SET IsDeleted = TRUE WHERE AuthorId = ?";
         jdbcTemplate.update(deleteUserSql, userId);
 
         return true;
     }
 
+
     @Override
     public boolean follow(AuthInfo auth, long followeeId) {
         verifyAuth(auth);
         long authorId = auth.getAuthorId();
-        if(authorId == followeeId) {
+
+        if (authorId == followeeId) {
             throw new SecurityException("Access denied: You cannot follow your own account.");
         }
-        if(login(auth) == -1L) {
+        if (login(auth) == -1L) {
             throw new SecurityException("Access denied: You cannot login your own account.");
         }
+
         String checkSQL = "SELECT IsDeleted FROM users WHERE AuthorId = ?";
         try {
             Boolean isDeleted = jdbcTemplate.queryForObject(checkSQL, Boolean.class, followeeId);
-            if(isDeleted) {
+            if (Boolean.TRUE.equals(isDeleted)) {
                 throw new SecurityException("Access denied: You cannot follow an account.");
             }
         } catch (org.springframework.dao.EmptyResultDataAccessException e) {
             throw new SecurityException("Target user does not exist.");
         }
+
         try {
             String relationSql = "SELECT COUNT(*) FROM user_follows WHERE followerid = ? AND followingid = ?";
-            Integer count = jdbcTemplate.queryForObject(relationSql, Integer.class, auth.getAuthorId(), followeeId);
-            if (count > 0) {
-                // A. 已关注 -> 执行取消关注 (Unfollow)
+            Integer count = jdbcTemplate.queryForObject(relationSql, Integer.class, authorId, followeeId);
+
+            if (count != null && count > 0) {
+                // Unfollow
                 String deleteSql = "DELETE FROM user_follows WHERE followerid = ? AND followingid = ?";
-                int rows = jdbcTemplate.update(deleteSql, auth.getAuthorId(), followeeId);
-                if (rows > 0) {
-                    // A2. 更新我的关注数 (My Following - 1)
-                    // COALESCE 确保如果原来是 NULL 则视为 0 (防止 NULL - 1 = NULL)
-                    String updateMyCount = "UPDATE users SET following = COALESCE(following, 0) - 1 WHERE authorid = ?";
-                    jdbcTemplate.update(updateMyCount, authorId);
-
-                    // A3. 更新对方的粉丝数 (Target Follower - 1)
-                    String updateTargetCount = "UPDATE users SET followers = COALESCE(followers, 0) - 1 WHERE authorid = ?";
-                    jdbcTemplate.update(updateTargetCount, followeeId);
-
-                    return false;
-                }
+                int rows = jdbcTemplate.update(deleteSql, authorId, followeeId);
+                // rows>0 => trigger will decrement counts
                 return false;
             } else {
-                // B. 未关注 -> 执行关注 (Follow)
+                // Follow
                 String insertSql = "INSERT INTO user_follows (followerid, followingid) VALUES (?, ?)";
-                int rows = jdbcTemplate.update(insertSql, auth.getAuthorId(), followeeId);
-                if (rows > 0) {
-                    // B2. 更新我的关注数 (My Following + 1)
-                    String updateMyCount = "UPDATE users SET following = COALESCE(following, 0) + 1 WHERE authorid = ?";
-                    jdbcTemplate.update(updateMyCount, authorId);
-
-                    // B3. 更新对方的粉丝数 (Target Follower + 1)
-                    String updateTargetCount = "UPDATE users SET followers = COALESCE(followers, 0) + 1 WHERE authorid = ?";
-                    jdbcTemplate.update(updateTargetCount, followeeId);
-
-                    return true;
-                }
-                return false;
+                int rows = jdbcTemplate.update(insertSql, authorId, followeeId);
+                // rows>0 => trigger will increment counts
+                return rows > 0;
             }
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // 例如违反 CHECK(follower != following) 或 FK
             return false;
         }
     }
+
 
 
     @Override

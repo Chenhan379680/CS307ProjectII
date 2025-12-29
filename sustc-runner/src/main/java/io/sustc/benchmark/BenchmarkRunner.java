@@ -1,5 +1,5 @@
 package io.sustc.benchmark;
-import java.util.List;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.sustc.service.DatabaseService;
 import lombok.SneakyThrows;
@@ -46,7 +46,6 @@ public class BenchmarkRunner implements ShellApplicationRunner {
     @Override
     @SneakyThrows
     public void run(ApplicationArguments args) {
-        val stepDesc = new java.util.HashMap<Integer, String>();
         log.info("Starting benchmark for group {}", databaseService.getGroupMembers());
         log.info("{}", benchmarkConfig);
 
@@ -64,15 +63,13 @@ public class BenchmarkRunner implements ShellApplicationRunner {
                 .sequential()
                 .filter(method -> method.isAnnotationPresent(BenchmarkStep.class))
                 .sorted(Comparator.comparingInt(m -> m.getAnnotation(BenchmarkStep.class).order()))
-                .peek(method -> {
-                    int id = method.getAnnotation(BenchmarkStep.class).order();
-                    String desc = StringUtils.defaultIfEmpty(
-                            method.getAnnotation(BenchmarkStep.class).description(),
-                            method.getName()
-                    );
-                    stepDesc.put(id, desc);
-                    log.info("Step {}: {}", id, desc);
-                })
+                .peek(method -> log.info("Step {}: {}",
+                        method.getAnnotation(BenchmarkStep.class).order(),
+                        StringUtils.defaultIfEmpty(
+                                method.getAnnotation(BenchmarkStep.class).description(),
+                                method.getName()
+                        )
+                ))
                 .map(method -> {
                     val future = executor.submit(() -> (BenchmarkResult) method.invoke(benchmarkService));
                     try {
@@ -107,11 +104,5 @@ public class BenchmarkRunner implements ShellApplicationRunner {
 
         executor.shutdownNow();
         objectMapper.writeValue(reportFile, results);
-        // ===== Pretty console report page (command-line "GUI") =====
-        BenchmarkReportPage.print(benchmarkConfig,
-                databaseService.getGroupMembers(),
-                results,
-                stepDesc);
-
     }
 }

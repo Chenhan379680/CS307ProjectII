@@ -5,6 +5,7 @@ import io.sustc.service.RecipeService;
 import io.sustc.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,7 +18,9 @@ import org.springframework.util.StringUtils;
 
 import java.sql.*;
 import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -48,6 +51,8 @@ public class RecipeServiceImpl implements RecipeService {
             throw new IllegalArgumentException();
         }
 
+        // 1. 修改 SQL：加入 LEFT JOIN 获取作者名字 (authorName)
+        // 就像修复 searchRecipes 一样，这里也需要作者名
         String sql = """
             SELECT r.recipeid AS RecipeId,
                    r.name AS name,
@@ -158,7 +163,6 @@ public class RecipeServiceImpl implements RecipeService {
         args.add(size);
         args.add((page - 1) * size);
 
-        // 10. 执行查询
         List<RecipeRecord> records = jdbcTemplate.query(
                 sql,
                 recipeRecordRowMapper,
@@ -166,13 +170,35 @@ public class RecipeServiceImpl implements RecipeService {
         );
 
         if (!records.isEmpty()) {
-            String ingredientSql = "SELECT ingredientpart FROM recipe_ingredients WHERE recipeid = ? ORDER BY LOWER(ingredientpart)";
-            for (RecipeRecord record : records) {
-                List<String> ingList = jdbcTemplate.queryForList(ingredientSql, String.class, record.getRecipeId());
-                record.setRecipeIngredientParts(ingList.toArray(new String[0]));
-            }
-        }
+            List<Object> recipeIds = records.stream()
+                    .map(RecipeRecord::getRecipeId)
+                    .collect(Collectors.toList());
 
+            String inSql = String.join(",", Collections.nCopies(recipeIds.size(), "?"));
+            String ingredientSql = "SELECT recipeid, ingredientpart FROM recipe_ingredients WHERE recipeid IN (" + inSql + ")";
+
+            jdbcTemplate.query(ingredientSql, recipeIds.toArray(), rs -> {
+                Map<Long, List<String>> ingredientsMap = new HashMap<>();
+                while (rs.next()) {
+                    Long rId = rs.getLong("recipeid");
+                    String part = rs.getString("ingredientpart");
+                    ingredientsMap.computeIfAbsent(rId, k -> new ArrayList<>()).add(part);
+                }
+
+                for (RecipeRecord record : records) {
+                    List<String> ingredients = ingredientsMap.get(record.getRecipeId());
+
+                    if (ingredients == null) {
+                        record.setRecipeIngredientParts(new String[0]);
+                    } else {
+                        ingredients.sort(String::compareToIgnoreCase);
+
+                        record.setRecipeIngredientParts(ingredients.toArray(new String[0]));
+                    }
+                }
+                return null;
+            });
+        }
         return new PageResult<>(records, page, size, total);
     }
 
@@ -288,53 +314,64 @@ public class RecipeServiceImpl implements RecipeService {
 
     @Override
     public void updateTimes(AuthInfo auth, long recipeId, String cookTimeIso, String prepTimeIso) {
+        // 1. 基础鉴权
         userService.verifyAuth(auth);
-
-        // 1. 获取旧数据
-        String selectSQL = "SELECT authorid, cooktime, preptime FROM recipes WHERE recipeid = ?";
-        var recipeData = jdbcTemplate.query(selectSQL, (rs) -> {
-            if (!rs.next()) return null;
-            Map<String, Object> data = new HashMap<>();
-            data.put("authorId", rs.getLong("authorid"));
-            data.put("cookTime", rs.getString("cooktime"));
-            data.put("prepTime", rs.getString("preptime"));
-            return data;
-        }, recipeId);
-
-        if (recipeData == null) {
+        Long dbAuthorId;
+        try {
+            dbAuthorId = jdbcTemplate.queryForObject(
+                    "SELECT authorid FROM recipes WHERE recipeid = ?",
+                    Long.class,
+                    recipeId
+            );
+        } catch (EmptyResultDataAccessException e) {
             throw new IllegalArgumentException("Recipe does not exist");
         }
 
-        if ((long) recipeData.get("authorId") != auth.getAuthorId()) {
-            throw new SecurityException("Only the recipe author can update times.");
+        if (dbAuthorId != auth.getAuthorId()) {
+            throw new SecurityException("You are not the author of this recipe.");
         }
-        String oldCookTimeStr = (String) recipeData.get("cookTime");
-        String oldPrepTimeStr = (String) recipeData.get("prepTime");
-
-        // 1. 确定 CookTime 的 Duration
-        Duration cookDuration;
-        if (cookTimeIso != null) {
-            cookDuration = parseDurationStrict(cookTimeIso);
-        } else {
-            cookDuration = parseDurationLenient(oldCookTimeStr);
-        }
-
-        // 2. 确定 PrepTime 的 Duration
-        Duration prepDuration;
-        if (prepTimeIso != null) {
-            prepDuration = parseDurationStrict(prepTimeIso);
-        } else {
-            prepDuration = parseDurationLenient(oldPrepTimeStr);
+        if (cookTimeIso != null && !cookTimeIso.isEmpty()) {
+            try {
+                Duration d = Duration.parse(cookTimeIso);
+                if (d.isNegative()) {
+                    throw new IllegalArgumentException("Cook time cannot be negative: " + cookTimeIso);
+                }
+            } catch (DateTimeParseException e) {
+                throw new IllegalArgumentException("Invalid cookTime format");
+            }
         }
 
-        // 3. 安全计算 TotalTime
-        Duration totalDuration = cookDuration.plus(prepDuration);
-        String updateSQL = "UPDATE recipes SET cooktime = ?, preptime = ?, totaltime = ? WHERE recipeid = ?";
+        if (prepTimeIso != null && !prepTimeIso.isEmpty()) {
+            try {
+                Duration d = Duration.parse(prepTimeIso);
+                if (d.isNegative()) {
+                    throw new IllegalArgumentException("Prep time cannot be negative: " + prepTimeIso);
+                }
+            } catch (DateTimeParseException e) {
+                throw new IllegalArgumentException("Invalid prepTime format");
+            }
+        }
 
-        jdbcTemplate.update(updateSQL,
-                cookDuration.toString(),
-                prepDuration.toString(),
-                totalDuration.toString(),
+        String sql = """
+        SET LOCAL intervalstyle = 'iso_8601';
+        
+        UPDATE recipes
+        SET
+            cooktime = COALESCE(NULLIF(?, '')::text, cooktime),
+            preptime = COALESCE(NULLIF(?, '')::text, preptime),
+            totaltime = TRIM(BOTH '"' FROM to_json(
+                            COALESCE(NULLIF(?, '')::interval, COALESCE(NULLIF(cooktime, ''), 'PT0S')::interval) +\s
+                            COALESCE(NULLIF(?, '')::interval, COALESCE(NULLIF(preptime, ''), 'PT0S')::interval)
+                        )::text)
+        WHERE recipeid = ?
+        """;
+        // 注意：WHERE 里不需要再判断 authorid 了，因为步骤 A 已经判断过了
+
+        jdbcTemplate.update(sql,
+                cookTimeIso,
+                prepTimeIso,
+                cookTimeIso,
+                prepTimeIso,
                 recipeId
         );
     }
@@ -418,36 +455,4 @@ public class RecipeServiceImpl implements RecipeService {
             return Duration.ZERO;
         }
     }
-
-    private Duration parseAndValidateDuration(String isoString) {
-        try {
-            Duration duration = Duration.parse(isoString);
-
-            // 检查负数
-            if (duration.isNegative()) {
-                throw new IllegalArgumentException(" cannot be negative.");
-            }
-            return duration;
-
-        } catch (java.time.format.DateTimeParseException e) {
-            // 捕捉解析错误，包装成 IllegalArgumentException
-            throw new IllegalArgumentException("Invalid ISO 8601 format");
-        }
-    }
-
-    private Duration parseDurationStrict(String isoString) {
-        if (isoString == null || isoString.isBlank()) {
-            throw new IllegalArgumentException();
-        }
-        try {
-            Duration d = Duration.parse(isoString);
-            if (d.isNegative()) {
-                throw new IllegalArgumentException();
-            }
-            return d;
-        } catch (java.time.format.DateTimeParseException e) {
-            throw new IllegalArgumentException();
-        }
-    }
-
 }

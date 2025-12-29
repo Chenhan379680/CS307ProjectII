@@ -231,35 +231,40 @@ public class ReviewServiceImpl implements ReviewService {
 
     @Override
     public PageResult<ReviewRecord> listByRecipe(long recipeId, int page, int size, String sort) {
-        if(page < 1 || size <= 0) {
+        if (page < 1 || size <= 0) {
             throw new IllegalArgumentException("page and size must be greater than 0");
         }
-
         String countSql = "SELECT COUNT(*) FROM reviews WHERE recipeId = ?";
         Long total = jdbcTemplate.queryForObject(countSql, Long.class, recipeId);
+        // 修正点 1：参数修正。这里原来传入的是 (..., size, offset, total)，这是错误的。
+        // PageResult 的构造函数通常是 (data, currentPage, pageSize, totalCount)
+        if (total == null || total == 0) {
+            return new PageResult<>(new ArrayList<>(), page, size, 0L);
+        }
+        // 修正点 2：使用 r.* 明确指代 reviews 表字段，防止与 users 表的同名字段（如 AuthorId）冲突
+        StringBuilder sqlBuilder = new StringBuilder(
+                "SELECT r.*, u.authorname " +
+                        "FROM reviews r " +
+                        "LEFT JOIN users u ON r.authorid = u.authorid " +
+                        "WHERE r.recipeId = ? "
+        );
+        // 修正点 3：添加 Tie-breaker (ReviewId) 保证分页稳定性
+        // 修正点 4：处理 null 或 unknown sort 的情况 (Default case)
+        if ("likes_desc".equals(sort)) {
+            // 先按点赞数倒序，点赞数相同时按时间倒序，最后按 ID 倒序
+            sqlBuilder.append(" ORDER BY r.likescount DESC, r.datemodified DESC, r.reviewid DESC ");
+        } else if ("date_desc".equals(sort)) {
+            sqlBuilder.append(" ORDER BY r.datemodified DESC, r.reviewid DESC ");
+        } else {
+            sqlBuilder.append(" ORDER BY r.datemodified DESC, r.reviewid DESC ");
+        }
+
+        sqlBuilder.append(" LIMIT ? OFFSET ?");
+
         int offset = (page - 1) * size;
-        if (total == 0) {
-            // 如果没有数据，直接返回空结果，省去后面的查询
-            return new PageResult<>(new ArrayList<>(), size, offset, total);
-        }
 
-        String sql = """
-            SELECT *, u.authorname
-            FROM reviews r
-            LEFT JOIN users u ON r.authorid = u.authorid
-            WHERE recipeId = ?
-        """;
-        switch (sort) {
-            case "date_desc":
-                sql += " ORDER BY datemodified desc";
-                break;
-            case "likes_desc":
-                sql += "ORDER BY likescount desc";
-                break;
-        }
-        sql += " LIMIT ? OFFSET ?";
-
-        List<ReviewRecord> records = jdbcTemplate.query(sql,
+        List<ReviewRecord> records = jdbcTemplate.query(
+                sqlBuilder.toString(),
                 (rs, rowNum) -> {
                     ReviewRecord record = new ReviewRecord();
                     record.setReviewId(rs.getLong("reviewid"));
@@ -271,18 +276,74 @@ public class ReviewServiceImpl implements ReviewService {
                     record.setDateSubmitted(rs.getTimestamp("datesubmitted"));
                     record.setDateModified(rs.getTimestamp("datemodified"));
                     return record;
-                }, recipeId, size, offset);
+                },
+                recipeId, size, offset
+        );
         if (!records.isEmpty()) {
-            String ingredientSql = " SELECT authorid FROM review_likes WHERE reviewid = ? ";
+            String likeSql = "SELECT authorid FROM review_likes WHERE reviewid = ?";
             for (ReviewRecord record : records) {
-                List<Long> likes = jdbcTemplate.queryForList(ingredientSql, Long.class, record.getReviewId());
+                List<Long> likes = jdbcTemplate.queryForList(likeSql, Long.class, record.getReviewId());
                 long[] likesArray = likes.stream().mapToLong(Long::longValue).toArray();
                 record.setLikes(likesArray);
             }
         }
+
         return new PageResult<>(records, page, size, total);
     }
 
+
+//    public PageResult<ReviewRecord> listByRecipe(long recipeId, int page, int size, String sort) {
+//        if(page < 1 || size <= 0) {
+//            throw new IllegalArgumentException("page and size must be greater than 0");
+//        }
+//
+//        String countSql = "SELECT COUNT(*) FROM reviews WHERE recipeId = ?";
+//        Long total = jdbcTemplate.queryForObject(countSql, Long.class, recipeId);
+//        int offset = (page - 1) * size;
+//        if (total == 0) {
+//            // 如果没有数据，直接返回空结果，省去后面的查询
+//            return new PageResult<>(new ArrayList<ReviewRecord>(), size, offset, total);
+//        }
+//
+//        String sql = """
+//            SELECT *, u.authorname
+//            FROM reviews r
+//            LEFT JOIN users u ON r.authorid = u.authorid
+//            WHERE recipeId = ?
+//        """;
+//        switch (sort) {
+//            case "date_desc":
+//                sql += " ORDER BY datemodified desc";
+//                break;
+//            case "likes_desc":
+//                sql += "ORDER BY likescount desc";
+//                break;
+//        }
+//        sql += " LIMIT ? OFFSET ?";
+//
+//        List<ReviewRecord> records = jdbcTemplate.query(sql,
+//                (rs, rowNum) -> {
+//                    ReviewRecord record = new ReviewRecord();
+//                    record.setReviewId(rs.getLong("reviewid"));
+//                    record.setRecipeId(rs.getLong("recipeid"));
+//                    record.setAuthorId(rs.getLong("authorid"));
+//                    record.setAuthorName(rs.getString("authorname"));
+//                    record.setRating(rs.getFloat("rating"));
+//                    record.setReview(rs.getString("review"));
+//                    record.setDateSubmitted(rs.getTimestamp("datesubmitted"));
+//                    record.setDateModified(rs.getTimestamp("datemodified"));
+//                    return record;
+//                }, recipeId, size, offset);
+//        if (!records.isEmpty()) {
+//            String ingredientSql = " SELECT authorid FROM review_likes WHERE reviewid = ? ";
+//            for (ReviewRecord record : records) {
+//                List<Long> likes = jdbcTemplate.queryForList(ingredientSql, Long.class, record.getReviewId());
+//                long[] likesArray = likes.stream().mapToLong(Long::longValue).toArray();
+//                record.setLikes(likesArray);
+//            }
+//        }
+//        return new PageResult<>(records, page, size, total);
+//    }
 
     @Override
     @Transactional
