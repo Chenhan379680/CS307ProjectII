@@ -81,12 +81,12 @@ public class RecipeRecord implements Serializable {
     /**
      * The score obtained of this recipe
      */
-    private float aggregatedRating;
+    private Float  aggregatedRating;
 
     /**
      * The reviewer's number of this recipe
      */
-    private int reviewCount;
+    private Integer  reviewCount;
 
     /**
      * Calories of this recipe

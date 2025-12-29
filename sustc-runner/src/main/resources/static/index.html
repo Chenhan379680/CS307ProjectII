@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Recipe Search</title>
+    <style>
+        body { font-family: system-ui, Arial; margin: 24px; max-width: 1100px; }
+        .row { display:flex; gap:12px; flex-wrap: wrap; align-items: center; }
+        input, select, button { padding: 8px 10px; }
+        button { cursor: pointer; }
+        button:disabled { opacity: .5; cursor: not-allowed; }
+        table { width:100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; vertical-align: top; }
+        .muted { color:#777; }
+        .card { border:1px solid #eee; padding:12px; border-radius: 10px; margin: 12px 0; }
+        .ok { color: #0a7; }
+        .bad { color: #c00; }
+        .pill { font-size: 12px; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; }
+        .right { margin-left: auto; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+        .small { font-size: 12px; }
+        .btn2 { border: 1px solid #ddd; background: #fff; border-radius: 8px; }
+        .btnPrimary { border: 1px solid #0a7; background: #0a7; color: #fff; border-radius: 8px; }
+    </style>
+</head>
+<body>
+
+<h2>Recipe Search</h2>
+
+<div class="card">
+    <div class="row">
+        <b>账号</b>
+        <span class="right pill" id="loginPill">未登录</span>
+    </div>
+
+    <div class="row" style="margin-top:8px;">
+        <input id="regName" placeholder="name" style="width:140px;">
+        <select id="regGender">
+            <option value="MALE">MALE</option>
+            <option value="FEMALE">FEMALE</option>
+            <option value="OTHER">OTHER</option>
+        </select>
+        <input id="regBirthday" placeholder="birthday (YYYY-MM-DD)" style="width:170px;" value="2004-01-01">
+        <input id="regPwd" placeholder="password" style="width:160px;">
+        <button class="btn2" onclick="doRegister()">注册</button>
+    </div>
+
+    <div class="row" style="margin-top:8px;">
+        <input id="authId" placeholder="author_id" style="width:120px;">
+        <input id="authPwd" placeholder="password" style="width:160px;">
+        <button class="btnPrimary" onclick="doLogin()">登录</button>
+        <button class="btn2" onclick="saveAuth()">手动保存</button>
+        <button class="btn2" onclick="logout()">登出</button>
+        <span id="authState" class="muted small"></span>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+        <button id="btnCreateRecipe" class="btnPrimary" onclick="openCreateRecipe()" disabled>➕ 创建 Recipe（需登录）</button>
+        <span class="muted small">创建后自动跳转 recipe.html</span>
+    </div>
+</div>
+
+<div class="card">
+    <div class="row">
+        <input id="keyword" placeholder="keyword (可空)" />
+        <input id="category" placeholder="category (可空)" />
+        <input id="minRating" placeholder="minRating (可空)" type="number" step="0.1" style="width:150px;" />
+        <select id="sort">
+            <option value="">sort (可空)</option>
+            <option value="rating_desc">rating_desc</option>
+            <option value="rating_asc">rating_asc</option>
+            <option value="time_desc">time_desc</option>
+            <option value="time_asc">time_asc</option>
+        </select>
+    </div>
+
+    <div class="row" style="margin-top:8px;">
+        <input id="page" type="number" value="1" style="width:90px;" />
+        <input id="size" type="number" value="10" style="width:90px;" />
+        <button class="btnPrimary" onclick="search()">搜索</button>
+        <button class="btn2" onclick="prevPage()">上一页</button>
+        <button class="btn2" onclick="nextPage()">下一页</button>
+        <span id="msg" class="muted"></span>
+    </div>
+</div>
+
+<table>
+    <thead>
+    <tr>
+        <th style="width:90px;">ID</th>
+        <th>Name</th>
+        <th style="width:160px;">Category</th>
+        <th style="width:90px;">Rating</th>
+        <th style="width:160px;">Author</th>
+        <th style="width:80px;"></th>
+    </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+</table>
+
+<script>
+    const BASE = ""; // 同源
+
+    // ---------------- Auth ----------------
+    function getAuth() {
+      const author_id = localStorage.getItem("author_id");
+      const password = localStorage.getItem("password");
+      if (!author_id || !password) return null;
+      return { author_id, password };
+    }
+
+    function setAuthUI() {
+      const a = getAuth();
+      const pill = document.getElementById("loginPill");
+      const btnCreate = document.getElementById("btnCreateRecipe");
+      const authState = document.getElementById("authState");
+
+      if (!a) {
+        pill.textContent = "未登录";
+        pill.style.borderColor = "#ddd";
+        pill.style.color = "#777";
+        btnCreate.disabled = true;
+        authState.textContent = "";
+        return;
+      }
+
+      pill.textContent = `已登录: ${a.author_id}`;
+      pill.style.borderColor = "#0a7";
+      pill.style.color = "#0a7";
+      btnCreate.disabled = false;
+      authState.textContent = `auth 已保存到 localStorage`;
+
+      // 同步到输入框（方便答辩演示）
+      document.getElementById("authId").value = a.author_id;
+      document.getElementById("authPwd").value = a.password;
+    }
+
+    function saveAuth() {
+      const id = document.getElementById("authId").value.trim();
+      const pwd = document.getElementById("authPwd").value.trim();
+      if (!id || !pwd) { alert("author_id 和 password 都要填"); return; }
+      localStorage.setItem("author_id", id);
+      localStorage.setItem("password", pwd);
+      setAuthUI();
+    }
+
+    function logout() {
+      localStorage.removeItem("author_id");
+      localStorage.removeItem("password");
+      setAuthUI();
+      alert("已登出");
+    }
+
+    async function request(path, method="GET", body=null, useAuth=false) {
+      const headers = {};
+      if (body !== null) headers["Content-Type"] = "application/json";
+      if (useAuth) {
+        const a = getAuth();
+        if (a) { headers["author_id"] = a.author_id; headers["password"] = a.password; }
+      }
+      const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : null });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+      if (!res.ok) throw { status: res.status, data };
+      return data;
+    }
+
+    async function doRegister() {
+      const name = document.getElementById("regName").value.trim();
+      const gender = document.getElementById("regGender").value;
+      const birthday = document.getElementById("regBirthday").value.trim();
+      const password = document.getElementById("regPwd").value.trim();
+      if (!name || !birthday || !password) { alert("name/birthday/password 必填"); return; }
+
+      try {
+        const userId = await request("/users/register", "POST", { name, gender, birthday, password }, false);
+        localStorage.setItem("author_id", String(userId));
+        localStorage.setItem("password", password);
+        setAuthUI();
+        alert(`注册成功！author_id=${userId}（已自动保存并视为登录态）`);
+      } catch (e) {
+        alert(`注册失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+
+    async function doLogin() {
+      const id = document.getElementById("authId").value.trim();
+      const pwd = document.getElementById("authPwd").value.trim();
+      if (!id || !pwd) { alert("author_id/password 必填"); return; }
+      // 先保存，再调用 login（因为 request(useAuth=true) 会读 localStorage）
+      localStorage.setItem("author_id", id);
+      localStorage.setItem("password", pwd);
+
+      try {
+        await request("/users/login", "POST", null, true);
+        setAuthUI();
+        alert("登录成功！");
+      } catch (e) {
+        // 失败就撤回保存，避免假登录
+        localStorage.removeItem("author_id");
+        localStorage.removeItem("password");
+        setAuthUI();
+        alert(`登录失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+
+    async function openCreateRecipe() {
+      const a = getAuth();
+      if (!a) { alert("请先登录"); return; }
+
+      const name = prompt("Recipe name?", "API Demo Recipe");
+      if (!name) return;
+      const category = prompt("Category?", "Demo") || "Demo";
+      const desc = prompt("Description?", "created from GUI") || "";
+
+      try {
+        const rid = await request("/recipes", "POST", {
+          name,
+          recipeCategory: category,
+          description: desc,
+          recipeIngredientParts: ["salt","water"],
+          cookTime: "PT10M",
+          prepTime: "PT5M",
+          totalTime: "PT15M",
+          datePublished: Date.now(),
+          calories: 100.0
+        }, true);
+
+        alert(`创建成功！recipeId=${rid}`);
+        location.href = `recipe.html?id=${rid}`;
+      } catch (e) {
+        alert(`创建失败：${e.status}\n${JSON.stringify(e.data)}`);
+      }
+    }
+
+    // ---------------- Search ----------------
+    function rowHtml(r) {
+      const rid = r.recipeId ?? r.id ?? "";
+      const name = escapeHtml(r.name ?? "");
+      const cat = escapeHtml(r.recipeCategory ?? "");
+      const rating = (r.aggregatedRating ?? "");
+      const author = escapeHtml(r.authorName ?? "");
+      return `
+        <tr>
+          <td class="mono">${rid}</td>
+          <td>${name}</td>
+          <td>${cat}</td>
+          <td>${rating}</td>
+          <td>${author}</td>
+          <td><a href="recipe.html?id=${rid}">详情</a></td>
+        </tr>
+      `;
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function getQueryParams() {
+      const keyword = document.getElementById("keyword").value.trim();
+      const category = document.getElementById("category").value.trim();
+      const minRating = document.getElementById("minRating").value.trim();
+      const sort = document.getElementById("sort").value;
+      const page = Number(document.getElementById("page").value || "1");
+      const size = Number(document.getElementById("size").value || "10");
+
+      const qs = new URLSearchParams();
+      if (keyword) qs.set("keyword", keyword);
+      if (category) qs.set("category", category);
+      if (minRating) qs.set("minRating", minRating);
+      if (sort) qs.set("sort", sort);
+      qs.set("page", String(page));
+      qs.set("size", String(size));
+      return qs;
+    }
+
+    async function search() {
+      const msg = document.getElementById("msg");
+      msg.textContent = "加载中...";
+      msg.className = "muted";
+
+      const qs = getQueryParams();
+      try {
+        const res = await request(`/recipes/search?${qs.toString()}`);
+        const items = res?.items ?? [];
+        document.getElementById("tbody").innerHTML = items.map(rowHtml).join("");
+        msg.textContent = `OK：total=${res.total}, page=${res.page}, size=${res.size}`;
+        msg.className = "ok";
+      } catch (e) {
+        document.getElementById("tbody").innerHTML = "";
+        msg.textContent = `ERROR ${e.status}: ${JSON.stringify(e.data)}`;
+        msg.className = "bad";
+      }
+    }
+
+    function prevPage() {
+      const p = Number(document.getElementById("page").value || "1");
+      document.getElementById("page").value = String(Math.max(1, p - 1));
+      search();
+    }
+
+    function nextPage() {
+      const p = Number(document.getElementById("page").value || "1");
+      document.getElementById("page").value = String(p + 1);
+      search();
+    }
+
+    // init
+    setAuthUI();
+    search();
+</script>
+
+</body>
+</html>

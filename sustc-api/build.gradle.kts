@@ -19,6 +19,7 @@ dependencies {
 
     // You may add any utility library you want to use, such as guava.
     // ORM libraries are prohibited in this project.
+    implementation ("org.springframework.boot:spring-boot-starter-web")
 }
 
 tasks.withType<BootRun> {
